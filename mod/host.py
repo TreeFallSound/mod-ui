@@ -1834,6 +1834,13 @@ class Host(object):
                             except Exception as e:
                                 logging.exception(e)
 
+        elif cmd == "beat_sync":
+            fields = data.split()
+            if len(fields) != 4:
+                logging.warning("[host] malformed beat_sync: %r", data)
+                return
+            self.msg_callback("beat_sync %s %s %s %s" % fields)
+
         elif cmd == "log":
             ltype, lmsg = data.split(" ", 1)
             self.msg_callback("log " + data)

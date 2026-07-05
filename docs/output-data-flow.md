@@ -9,6 +9,47 @@ mod-host continuously produces two kinds of feedback on its read socket (port 55
 
 These share the same socket and the same flow-control mechanism.
 
+## Plugin Self-Writes to Input Ports Are Never Echoed
+
+Both `output_set` and `param_set` require mod-host itself to be the one that changed
+the value. There is no mechanism that notices a *plugin* silently overwriting its own
+port buffer inside `run()` and forwards that as feedback.
+
+Concretely, in `mod-host/src/effects.c`:
+
+- **`output_set`** is gated by `HINT_MONITORED` (`effects.c:229`, `// outputs only`).
+  `effects_monitor_output_parameter` (`effects.c:6563`) resolves the symbol via
+  `FindEffectOutputPortBySymbol` — it requires an `lv2:OutputPort`. A plugin cannot
+  get this feedback for an `lv2:InputPort`, full stop, regardless of what the plugin
+  does with that port's buffer at runtime.
+- **`param_set`** is sent from `SetPortValue` (`effects.c:2311`, broadcast at
+  `effects.c:2355-2370`) — but only when *mod-host* is the one calling it: a browser
+  `param_set` command, an HMI actuator, or a MIDI-learned CC (`effects.c:2755-2763`,
+  which computes a value from the raw CC and mod-host's own min/max mapping *before*
+  the plugin ever runs). None of these paths re-check the port after `run()` returns.
+
+So a plugin pattern like "declare a control port as `lv2:InputPort` so the host will
+also feed external triggers into it, but have the plugin overwrite the same buffer
+every block with its own authoritative computed value" (used by, e.g., the loopjefe
+LV2 plugin's 5-state `state` port, one physical port doing double duty as trigger-in
+and status-out) gets **no feedback loop at all** for the plugin's own correction:
+
+1. A MIDI CC or `param_set` write lands in the port buffer and gets echoed to the
+   browser (`SetPortValue`) — this is the *raw incoming* value, not anything the
+   plugin has computed yet.
+2. The plugin's `run()` reads that value, treats it as "changed, thus a trigger",
+   computes its own real next value internally, and overwrites the same buffer
+   directly with a raw pointer write.
+3. Nothing observes step 2. mod-ui never learns the corrected value; the browser
+   widget is left displaying whatever raw value survived step 1, which can be
+   arbitrarily wrong relative to the plugin's actual internal state.
+
+The plugin's own internal logic/engine state is unaffected — this only desyncs
+whatever a browser modgui renders from the port's displayed value. If a plugin needs
+the GUI to reflect a runtime-computed correction like this, it needs a genuine
+`lv2:OutputPort` mirror that `MONITOR_OUTPUT` can actually watch; reusing the
+input-port buffer for both directions does not get an echo through either path above.
+
 ## The `data_finish` / `output_data_ready` Handshake
 
 mod-host batches one frame of output data, then signals the end:
