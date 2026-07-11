@@ -1835,11 +1835,13 @@ class Host(object):
                                 logging.exception(e)
 
         elif cmd == "beat_sync":
+            # t_us bpm bpb beat_in_bar — a clock sample (t_us=now), not a
+            # back-dated downbeat event; see mod-host src/effects.c.
             fields = data.split()
             if len(fields) != 4:
                 logging.warning("[host] malformed beat_sync: %r", data)
                 return
-            self.msg_callback("beat_sync %s %s %s %s" % fields)
+            self.msg_callback("beat_sync %s %s %s %s" % tuple(fields))
 
         elif cmd == "log":
             ltype, lmsg = data.split(" ", 1)
