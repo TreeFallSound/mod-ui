@@ -33,9 +33,9 @@ def resize_image(img):
     if height > MAX_THUMB_HEIGHT:
         width = width * MAX_THUMB_HEIGHT / height
         height = MAX_THUMB_HEIGHT
-    # ANTIALIAS is deprecated and will be removed in Pillow 10 (2023-07-01).
-    # Use Resampling.LANCZOS instead.
-    img.thumbnail((width, height), Image.ANTIALIAS)
+    # ANTIALIAS was removed in Pillow 10; LANCZOS is its direct replacement
+    # (kept as a top-level alias, so this works on old and new Pillow alike).
+    img.thumbnail((width, height), Image.LANCZOS)
 
 
 class Anchor(Enum):
