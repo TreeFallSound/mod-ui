@@ -6,7 +6,7 @@
 
 This is a fork of [mod-audio/mod-ui](https://github.com/moddevices/mod-ui), the web UI + control layer for the MOD audio ecosystem. It runs as a Python/Tornado webserver and talks to `mod-host` over a socket. It discovers LV2 plugins and pedalboards via `lilv`, serves an HTML5 pedalboard editor, and pushes real-time state to connected browsers and hardware peers over WebSocket.
 
-This fork is customized for the **pi-stomp** guitar-pedal hardware platform. It lives as a sibling to `pi-stomp`, `pistomp-arch`, `pi-gen-pistomp`, `pistomp-recovery`, etc.
+This fork is customized for the **pi-stomp** guitar-pedal hardware platform. It lives as a sibling to `pi-stomp`, `pi-gen-pistomp`, `pistomp-recovery`, etc.
 
 ### Why "ultimate"
 
@@ -56,7 +56,7 @@ export JACK_PROMISCUOUS_SERVER=jack
 python3 server.py
 ```
 
-On the device these values are injected by the `mod-ui.service` in `pistomp-arch` (see `files/mod-ui.service`).
+On the device these values are injected by the `mod-ui.service` in `pi-gen-pistomp` (see `debpkgs/mod-ui/debian/mod-ui.mod-ui.service`).
 
 ## Repo layout
 
@@ -149,7 +149,7 @@ These came up in conversation and were either rejected or left as future work. D
 
 ### 1. Runtime PatchStorage slug resolution
 
-The idea was to resolve `platform_id`/`target_id` from stable slugs (`lv2-plugins`, `rpi-aarch64`) at startup, so a future PatchStorage renumbering would not silently break the store. The user rejected this; the current approach is to set the numeric IDs as environment variables in `pistomp-arch/files/mod-ui.service`.
+The idea was to resolve `platform_id`/`target_id` from stable slugs (`lv2-plugins`, `rpi-aarch64`) at startup, so a future PatchStorage renumbering would not silently break the store. The user rejected this; the current approach is to set the numeric IDs as environment variables in `pi-gen-pistomp/debpkgs/mod-ui/debian/mod-ui.mod-ui.service`.
 
 ### 2. Self-hosted / mirror plugin catalog
 
@@ -199,15 +199,14 @@ make -C utils clean && make -C utils
 
 # Python lint/smoke (no formal test suite in mod-ui itself)
 python3 -m py_compile mod/host.py mod/session.py mod/webserver.py
-```
+```x
 
 The real integration tests live in `../pi-stomp` (a `uv`/`pytest` project). Any change to WebSocket message format or pedalboard loading should be validated there.
 
 ## Related repos
 
 - `../pi-stomp` — the LCD/footswitch/encoder application that talks to this mod-ui over WebSocket and MIDI.
-- `../pistomp-arch` — Arch Linux OS build and systemd units (owns `mod-ui.service`).
-- `../pi-gen-pistomp` — image generation; consumes `pistomp-arch` packages.
+- `../pi-gen-pistomp` — image generation and OS build; owns the Debian packaging and systemd units (including `mod-ui.service`).
 - `../pistomp-recovery` — recovery/rollback UI; should not duplicate PatchStorage pedalboard updates.
 - `../mod-host` — the LV2 plugin host this UI controls.
 
