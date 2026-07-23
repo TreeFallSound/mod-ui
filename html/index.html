@@ -160,6 +160,7 @@ $('document').ready(function() {
         bufferSizeButton: $('#mod-buffersize'),
         xrunsButton: $('#mod-xruns'),
         cpuStatsButton: $('#mod-cpu-stats'),
+        recorderButton: $('#mod-recorder'),
     })
 
     if ('{{bundlepath}}' && '{{title}}') {
@@ -751,6 +752,7 @@ $('document').ready(function() {
         </div>
         <div id="mod-cpu-stats" class="icon mod-hidden">0 GHz / 0 &deg;C</div>
         <div id="mod-xruns" class="icon mod-hidden">0 Xruns</div>
+        <div id="mod-recorder" class="icon" data-message="Record session audio">Record</div>
         <div id="mod-buffersize" class="icon">{{bufferSize}} frames</div>
         <div id="mod-bypassRight" class="icon mod-bypass">Bypass 2</div>
         <div id="mod-bypassLeft" class="icon mod-bypass">Bypass 1</div>

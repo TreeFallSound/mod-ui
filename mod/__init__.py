@@ -44,8 +44,7 @@ def check_environment():
                               DEFAULT_PEDALBOARD, DEFAULT_PEDALBOARD_COPY,
                               DATA_DIR, DOWNLOAD_TMP_DIR, PEDALBOARD_TMP_DIR,
                               KEYS_PATH, USER_BANKS_JSON_FILE, FAVORITES_JSON_FILE,
-                              UPDATE_CC_FIRMWARE_FILE, UPDATE_MOD_OS_FILE, UPDATE_MOD_OS_HERLPER_FILE,
-                              CAPTURE_PATH, PLAYBACK_PATH)
+                              UPDATE_CC_FIRMWARE_FILE, UPDATE_MOD_OS_FILE, UPDATE_MOD_OS_HERLPER_FILE)
 
     # create temp dirs
     if not os.path.exists(DOWNLOAD_TMP_DIR):
@@ -55,7 +54,7 @@ def check_environment():
     os.makedirs(PEDALBOARD_TMP_DIR)
 
     # remove temp files
-    for path in (CAPTURE_PATH, PLAYBACK_PATH, UPDATE_CC_FIRMWARE_FILE):
+    for path in (UPDATE_CC_FIRMWARE_FILE,):
         if os.path.exists(path):
             os.remove(path)
 

@@ -373,7 +373,7 @@ hr.dotted {
     display: none;
   }
   #mod-show-midi-port, #mod-transport-icon, .mod-bypass,
-  #mod-cpu, #mod-ram, #mod-xruns, #mod-buffersize, #mod-cpu-stats {
+  #mod-cpu, #mod-ram, #mod-xruns, #mod-buffersize, #mod-cpu-stats, #mod-recorder {
     background-position: 8px 50%;
     background-repeat: no-repeat;
     padding-left: 40px;
@@ -443,6 +443,31 @@ hr.dotted {
   #mod-buffersize {
     background-image: url(../img/icons/25/cpu.png);
     width: 125px !important;
+  }
+  #mod-recorder {
+    position: relative;
+    width: 115px !important;
+    &:before {
+      content: "";
+      position: absolute;
+      left: 15px;
+      top: 50%;
+      margin-top: -6px;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background-color: #999;
+      transition: background-color 0.33s;
+    }
+    &.recording:before {
+      background-color: #ff3030;
+      animation: mod-recorder-pulse 1.5s ease-in-out infinite;
+    }
+  }
+  @keyframes mod-recorder-pulse {
+    0%   { opacity: 1; }
+    50%  { opacity: 0.35; }
+    100% { opacity: 1; }
   }
 
     .progress {

@@ -106,8 +106,7 @@ PEDALBOARD_URI = "urn:mod:pedalboard"
 UNTITLED_PEDALBOARD_NAME="Untitled Pedalboard"
 DEFAULT_SNAPSHOT_NAME="Default"
 
-CAPTURE_PATH='/tmp/capture.ogg'
-PLAYBACK_PATH='/tmp/playback.ogg'
+RECORDINGS_DIR = os.path.join(USER_FILES_DIR, 'Audio Recordings')
 
 UPDATE_MOD_OS_FILE='/data/{}'.format(os.environ.get('MOD_UPDATE_MOD_OS_FILE', 'modduo.tar').replace('*','cloud'))
 UPDATE_MOD_OS_HERLPER_FILE='/data/boot-restore'

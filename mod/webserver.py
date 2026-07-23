@@ -38,7 +38,7 @@ from mod.settings import (APP, LOG, DEV_API,
                           LV2_PLUGIN_DIR, LV2_PEDALBOARDS_DIR, IMAGE_VERSION,
                           UPDATE_CC_FIRMWARE_FILE, UPDATE_MOD_OS_FILE, UPDATE_MOD_OS_HERLPER_FILE, USING_256_FRAMES_FILE,
                           DEFAULT_ICON_TEMPLATE, DEFAULT_SETTINGS_TEMPLATE, DEFAULT_ICON_IMAGE,
-                          DEFAULT_PEDALBOARD, DEFAULT_SNAPSHOT_NAME, DATA_DIR, KEYS_PATH, USER_FILES_DIR,
+                          DEFAULT_PEDALBOARD, DEFAULT_SNAPSHOT_NAME, DATA_DIR, KEYS_PATH, USER_FILES_DIR, RECORDINGS_DIR,
                           FAVORITES_JSON_FILE, PREFERENCES_JSON_FILE, USER_ID_JSON_FILE,
                           DEV_HOST, UNTITLED_PEDALBOARD_NAME, MODEL_CPU, MODEL_TYPE, PEDALBOARDS_LABS_HTTP_ADDRESS,
                           PATCHSTORAGE_ENABLED, PATCHSTORAGE_API_URL, PATCHSTORAGE_PLATFORM_ID, PATCHSTORAGE_TARGET_ID, BLOKAS_ENABLED,
@@ -1518,9 +1518,7 @@ class PedalboardPackBundle(TimelessRequestHandler):
         bundlename = os.path.basename(bundlepath)
         # /tmp/*
         tmpdir   = "/tmp"
-        tmpaudio = os.path.join(tmpdir, "audio.ogg")
         tmpstep1 = os.path.join(tmpdir, "pedalboard.tar.gz")
-        tmpstep2 = os.path.join(tmpdir, "pedalboard+audio.tar.gz")
 
         # local usage
         ioloop = IOLoop.instance()
@@ -1535,37 +1533,12 @@ class PedalboardPackBundle(TimelessRequestHandler):
             self.finish()
             os.remove(tmpfile)
 
-        # callback for audio + pedalboard.tar.gz packing
-        def end_proc2(fileno, event):
-            if self.proc.poll() is None:
-                return
-            ioloop.remove_handler(fileno)
-
-            os.remove(tmpaudio)
-            os.remove(tmpstep1)
-            end_procs(tmpstep2)
-
         # callback for pedalboard packing
         def end_proc1(fileno, event):
             if self.proc.poll() is None:
                 return
             ioloop.remove_handler(fileno)
-
-            # stop now if no audio available
-            if SESSION.recordhandle is None:
-                end_procs(tmpstep1)
-                return
-
-            # dump audio to disk
-            SESSION.recordhandle.seek(0)
-            with open(tmpaudio, 'wb') as fh:
-                fh.write(SESSION.recordhandle.read())
-
-            # pack audio + pedalboard.tar.gz
-            self.proc = subprocess.Popen(['tar', 'chzf', tmpstep2, "audio.ogg", "pedalboard.tar.gz"],
-                                        cwd=tmpdir,
-                                        stdout=subprocess.PIPE)
-            ioloop.add_handler(self.proc.stdout.fileno(), end_proc2, 16)
+            end_procs(tmpstep1)
 
         # start packing pedalboard
         self.proc = subprocess.Popen(['tar', 'chzf', tmpstep1, bundlename],
@@ -2269,57 +2242,24 @@ class AuthToken(JsonRequestHandler):
 
 class RecordingStart(JsonRequestHandler):
     def get(self):
-        SESSION.web_recording_start()
-        self.write(True)
+        ok, result = SESSION.web_recording_start()
+        if ok:
+            self.write({'ok': True, 'filename': result})
+        else:
+            self.write({'ok': False, 'error': result})
 
 class RecordingStop(JsonRequestHandler):
     def get(self):
-        SESSION.web_recording_stop()
-        self.write(True)
+        filename, duration = SESSION.web_recording_stop()
+        if filename is None:
+            self.write({'ok': False, 'error': "not recording"})
+        else:
+            self.write({'ok': True, 'filename': filename, 'duration': duration})
 
-class RecordingReset(JsonRequestHandler):
+class RecordingStatus(JsonRequestHandler):
     def get(self):
-        SESSION.web_recording_delete()
-        self.write(True)
-
-class RecordingPlay(JsonRequestHandler):
-    waiting_request = None
-
-    @web.asynchronous
-    def get(self, action):
-        if action == 'start':
-            SESSION.web_playing_start(RecordingPlay.stop_callback)
-            self.write(True)
-            return
-
-        if action == 'wait':
-            if RecordingPlay.waiting_request is not None:
-                RecordingPlay.stop_callback()
-            RecordingPlay.waiting_request = self
-            return
-
-        if action == 'stop':
-            SESSION.web_playing_stop()
-            self.write(True)
-            return
-
-        raise web.HTTPError(404)
-
-    @classmethod
-    def stop_callback(cls):
-        if cls.waiting_request is None:
-            return
-        cls.waiting_request.write(True)
-        cls.waiting_request = None
-
-class RecordingDownload(JsonRequestHandler):
-    def get(self):
-        recd = SESSION.web_recording_download()
-        data = {
-            'ok'   : bool(recd),
-            'audio': b64encode(recd).decode("utf-8") if recd else ""
-        }
-        self.write(data)
+        recording, filename, elapsed = SESSION.web_recording_status()
+        self.write({'recording': recording, 'filename': filename, 'elapsed': elapsed})
 
 class TokensDelete(JsonRequestHandler):
     def get(self):
@@ -2542,9 +2482,8 @@ application = web.Application(
 
             (r"/recording/start", RecordingStart),
             (r"/recording/stop", RecordingStop),
-            (r"/recording/play/(start|wait|stop)", RecordingPlay),
-            (r"/recording/download", RecordingDownload),
-            (r"/recording/reset", RecordingReset),
+            (r"/recording/status", RecordingStatus),
+            (r"/recording/file/(.*)", web.StaticFileHandler, {"path": RECORDINGS_DIR}),
 
             (r"/tokens/delete", TokensDelete),
             (r"/tokens/get", TokensGet),

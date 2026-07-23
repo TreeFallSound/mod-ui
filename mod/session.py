@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: 2012-2023 MOD Audio UG
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-import os, time, logging, json
+import os, shutil, time, logging, json
 
 from datetime import timedelta
 from tornado import iostream, gen
@@ -11,12 +11,15 @@ from tornado.ioloop import IOLoop, PeriodicCallback
 from mod import safe_json_load, TextFileFlusher
 from mod.development import FakeHost, FakeHMI
 from mod.hmi import HMI
-from mod.recorder import Recorder, Player
+from mod.recorder import Recorder
 from mod.screenshot import ScreenshotGenerator
-from mod.settings import (LOG,
+from mod.settings import (LOG, RECORDINGS_DIR,
                           DEV_ENVIRONMENT, DEV_HMI, DEV_HOST,
                           HMI_SERIAL_PORT, HMI_BAUD_RATE, HMI_TIMEOUT,
                           PREFERENCES_JSON_FILE, DEFAULT_SNAPSHOT_NAME, UNTITLED_PEDALBOARD_NAME)
+
+# Refuse to start a new recording below this much free space at RECORDINGS_DIR.
+RECORDING_MIN_FREE_BYTES = 500 * 1024 * 1024
 
 if DEV_HOST:
     Host = FakeHost
@@ -64,9 +67,8 @@ class Session(object):
         logging.basicConfig(level=(logging.DEBUG if LOG else logging.WARNING))
 
         self.prefs = UserPreferences()
-        self.player = Player()
         self.recorder = Recorder()
-        self.recordhandle = None
+        self.recorder.watch_for_crash(self._recording_crashed)
         self.external_ui_timer = None
 
         self.screenshot_generator = ScreenshotGenerator()
@@ -244,6 +246,8 @@ class Session(object):
         def ready(_):
             self.websockets.append(ws)
             self.host.open_connection_if_needed(ws)
+            if self.recorder.recording:
+                ws.write_message("recording start %s" % self.recorder.filename)
             callback(True)
 
         # if this is the 1st socket, start ui session
@@ -267,51 +271,38 @@ class Session(object):
 
     # -----------------------------------------------------------------------------------------------------------------
 
-    # Start recording
+    # Start recording. Returns (ok, filename_or_error).
     def web_recording_start(self):
-        self.player.stop()
-        self.recorder.start()
+        if self.recorder.recording:
+            return False, "already recording"
 
-    # Stop recording
+        os.makedirs(RECORDINGS_DIR, exist_ok=True)
+        free = shutil.disk_usage(RECORDINGS_DIR).free
+        if free < RECORDING_MIN_FREE_BYTES:
+            return False, "not enough free disk space"
+
+        filename = self.recorder.start()
+        self.msg_callback("recording start %s" % filename)
+        return True, filename
+
+    # Stop recording. Returns (filename, duration_seconds), or (None, None) if not recording.
     def web_recording_stop(self):
-        if self.recordhandle is not None:
-            self.recordhandle.close()
-        self.recordhandle = self.recorder.stop(True)
+        result = self.recorder.stop()
+        if result is None:
+            return None, None
+        filename, duration = result
+        self.msg_callback("recording stop %s %.1f" % (filename, duration))
+        return filename, duration
 
-    # Delete previous recording, if any
-    def web_recording_delete(self):
-        self.player.stop()
+    # Recorder process died unexpectedly (disk full, JACK gone, ...)
+    def _recording_crashed(self, filename, duration):
+        self.msg_callback("recording stop %s %.1f" % (filename, duration))
 
-        if self.recordhandle is not None:
-            self.recordhandle.close()
-            self.recordhandle = None
-
-    # Return recording data
-    def web_recording_download(self):
-        if self.recordhandle is None:
-            return ""
-
-        self.recordhandle.seek(0)
-        return self.recordhandle.read()
-
-    # Playback of previous recording started
-    def web_playing_start(self, callback):
-        if self.recordhandle is None:
-            self.recordhandle = self.recorder.stop(True)
-
-        def stop():
-            self.host.unmute()
-            callback()
-
-        def schedule_stop():
-            IOLoop.instance().add_timeout(timedelta(seconds=0.5), stop)
-
-        self.host.mute()
-        self.player.play(self.recordhandle, schedule_stop)
-
-    # Playback stopped
-    def web_playing_stop(self):
-        self.player.stop()
+    # Current recording state, for a client to resync on page load / reconnect
+    def web_recording_status(self):
+        if not self.recorder.recording:
+            return False, None, 0
+        return True, self.recorder.filename, time.time() - self.recorder.tstamp
 
     # -----------------------------------------------------------------------------------------------------------------
     # Websocket funtions, called when receiving messages from socket (see webserver.py)
