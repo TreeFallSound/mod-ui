@@ -36,8 +36,8 @@ function Desktop(elements) {
         cloudPluginBoxTrigger: $('<div>'),
         patchstorageBox: $('<div>'),
         patchstorageBoxTrigger: $('<div>'),
+        patchstorageHub: $('<div>'),
         patchstoragePedalboardsBox: $('<div>'),
-        patchstoragePedalboardsBoxTrigger: $('<div>'),
         pedalboardTrigger: $('<div>'),
         fileManagerBox: $('<div>'),
         fileManagerBoxTrigger: $('<div>'),
@@ -370,6 +370,7 @@ function Desktop(elements) {
         $('#cloud-plugins-library').css('z-index', -1)
         $('#patchstorage-library').css('z-index', -1)
         $('#patchstorage-pedalboards-library').css('z-index', -1)
+        $('#patchstorage-hub').css('z-index', -1)
         $('#pedalboards-library').css('z-index', -1)
         $('#bank-library').css('z-index', -1)
         $('#main-menu').css('z-index', -1)
@@ -731,11 +732,13 @@ function Desktop(elements) {
                                         elements.effectBoxTrigger)
     this.cloudPluginBox = self.makeCloudPluginBox(elements.cloudPluginBox,
                                                   elements.cloudPluginBoxTrigger)
+    this.patchstorageHub = self.makePatchstorageHub(elements.patchstorageHub,
+                                                    elements.patchstorageBoxTrigger)
     this.patchstorageBox = self.makePatchstorageBox(elements.patchstorageBox,
                                                   elements.patchstorageBoxTrigger)
     this.patchstoragePedalboardsBox = self.makePatchstoragePedalboardsBox(
                                                   elements.patchstoragePedalboardsBox,
-                                                  elements.patchstoragePedalboardsBoxTrigger)
+                                                  elements.patchstorageBoxTrigger)
     this.pedalboardBox = self.makePedalboardBox(elements.pedalboardBox,
                                                 elements.pedalboardBoxTrigger)
     this.bankBox = self.makeBankBox(elements.bankBox,
@@ -1278,7 +1281,6 @@ function Desktop(elements) {
     elements.bankBoxTrigger.statusTooltip()
     elements.cloudPluginBoxTrigger.statusTooltip()
     elements.patchstorageBoxTrigger.statusTooltip()
-    elements.patchstoragePedalboardsBoxTrigger.statusTooltip()
     elements.fileManagerBoxTrigger.statusTooltip()
 
     this.upgradeWindow = elements.upgradeWindow.upgradeWindow({
@@ -1714,10 +1716,45 @@ Desktop.prototype.makeCloudPluginBox = function (el, trigger) {
     })
 }
 
-Desktop.prototype.makePatchstorageBox = function (el, trigger) {
+Desktop.prototype.makePatchstorageHub = function (el, menuTrigger) {
     var self = this
-    return el.patchstorageBox({
-        trigger: trigger,
+    if (!el || !el.length) {
+        console.error('[patchstorage] #patchstorage-hub not found in DOM')
+        return el
+    }
+
+    el.window({
+        trigger: menuTrigger,
+        windowManager: this.windowManager,
+        windowName: "Patchstorage",
+        isMainWindow: true
+    })
+
+    el.find('.ps-hub-asset').on('click', function () {
+        var asset = $(this).data('asset')
+        el.window('close')
+        if (asset === 'plugins') {
+            self.patchstorageBox.removeClass('mod-hidden')
+            self.patchstorageBox.window('open')
+        } else if (asset === 'pedalboards') {
+            self.patchstoragePedalboardsBox.removeClass('mod-hidden')
+            self.patchstoragePedalboardsBox.window('open')
+        }
+        // Keep the blue P selected while a child page is open
+        if (menuTrigger && menuTrigger.length) {
+            menuTrigger.addClass('selected')
+            $('#mod-plugins').removeClass('selected')
+        }
+    })
+
+    return el
+}
+
+Desktop.prototype.makePatchstorageBox = function (el, menuTrigger) {
+    var self = this
+    var box = el.patchstorageBox({
+        // Hub owns the menu trigger; this page is opened from the hub
+        trigger: null,
         windowManager: this.windowManager,
         removePluginBundles: function (bundles, callback) {
             if (!confirm('You are about to remove this plugin and any other in the same bundle. This may break pedalboards that depend on them.'))
@@ -1750,35 +1787,31 @@ Desktop.prototype.makePatchstorageBox = function (el, trigger) {
             self.installationQueue.installUsingURI(uri, usingLabs, callback)
         }
     })
+
+    el.data('trigger', menuTrigger)
+
+    el.find('.js-ps-back').on('click', function () {
+        el.window('close')
+        self.patchstorageHub.window('open')
+        return false
+    })
+
+    return box
 }
 
-Desktop.prototype.makePatchstoragePedalboardsBox = function (el, trigger) {
+Desktop.prototype.makePatchstoragePedalboardsBox = function (el, menuTrigger) {
     var self = this
-
-    // Always bind to the live menu icon (not a possibly-empty jQuery selection from init time)
-    var menuTrigger = $('#main-menu #patchstorage-pedalboards')
-    if (!menuTrigger.length) {
-        menuTrigger = trigger
-    }
 
     if (!$.fn.patchstoragePedalboardsBox) {
         console.error('[patchstorage] patchstorage_pedalboards.js did not load ($.fn.patchstoragePedalboardsBox missing)')
-        menuTrigger.on('click.psPedalboards', function () {
-            new Notification('error', 'Patchstorage Pedalboards failed to load (JS missing)', 5000)
-        })
         return el
     }
 
     if (!el || !el.length) {
         console.error('[patchstorage] #patchstorage-pedalboards-library not found in DOM')
-        menuTrigger.on('click.psPedalboards', function () {
-            new Notification('error', 'Patchstorage Pedalboards panel missing from page', 5000)
-        })
         return el
     }
 
-    // Do not pass trigger into window() — we bind the menu icon ourselves below.
-    // Passing both causes open-then-close on a single click.
     var box = el.patchstoragePedalboardsBox({
         trigger: null,
         windowManager: this.windowManager,
@@ -1811,13 +1844,11 @@ Desktop.prototype.makePatchstoragePedalboardsBox = function (el, trigger) {
         }
     })
 
-    // Store trigger for selected-state styling used by window open/close
     el.data('trigger', menuTrigger)
-    menuTrigger.removeClass('selected')
 
-    menuTrigger.off('click.psPedalboards').on('click.psPedalboards', function () {
-        el.removeClass('mod-hidden')
-        el.window('toggle')
+    el.find('.js-ps-back').on('click', function () {
+        el.window('close')
+        self.patchstorageHub.window('open')
         return false
     })
 

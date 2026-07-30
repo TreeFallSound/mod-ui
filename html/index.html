@@ -142,8 +142,8 @@ $('document').ready(function() {
         cloudPluginBoxTrigger: $('#mod-cloud-plugins'),
         patchstorageBox: $('#patchstorage-library'),
         patchstorageBoxTrigger: $('#main-menu #patchstorage'),
+        patchstorageHub: $('#patchstorage-hub'),
         patchstoragePedalboardsBox: $('#patchstorage-pedalboards-library'),
-        patchstoragePedalboardsBoxTrigger: $('#main-menu #patchstorage-pedalboards'),
         pedalboardBox: $('#pedalboards-library'),
         pedalboardBoxTrigger: $('#main-menu #mod-pedalboard'),
         bankBox: $('#bank-library'),
@@ -297,7 +297,6 @@ $('document').ready(function() {
 
     if (!{{patchstorage_enabled}}) {
         $('#patchstorage').hide()
-        $('#patchstorage-pedalboards').hide()
     }
 
     if (PREFERENCES['dev-mode'] == "on") {
@@ -738,7 +737,6 @@ $('document').ready(function() {
         <div id="mod-file-manager" class="icon" data-message="File Manager"></div>
         <div id="mod-cloud-plugins" class="icon" data-message="Plugin Store"></div>
         <div id="patchstorage" class="icon" data-message="Patchstorage"></div>
-        <div id="patchstorage-pedalboards" class="icon" data-message="Patchstorage Pedalboards"></div>
         <div id="banks-saving">Auto saving banks...</div>
         <div id="mod-update" class="status icon"></div>
         <div id="blokas-update" class="status icon mod-hidden"></div>
@@ -920,11 +918,41 @@ $('document').ready(function() {
     </div>
     <!-- END CLOUD PLUGINS LIBRARY -->
 
+    <!-- PATCHSTORAGE HUB (asset type selection) -->
+    <div id="patchstorage-hub" class="mod-hidden mod-init-hidden">
+        <div>
+            <header>
+                <h1 class="bottom top">PATCHSTORAGE</h1>
+            </header>
+            <div class="ps-hub-content">
+                <p class="ps-hub-intro">Choose an asset type to browse and install from Patchstorage.</p>
+                <div class="ps-hub-assets">
+                    <button type="button" class="ps-hub-asset" data-asset="plugins">
+                        <span class="ps-hub-icon ps-hub-icon-plugins">P</span>
+                        <span class="ps-hub-text">
+                            <span class="ps-hub-label">Plugins</span>
+                            <span class="ps-hub-desc">LV2 plugins available on Patchstorage</span>
+                        </span>
+                    </button>
+                    <button type="button" class="ps-hub-asset" data-asset="pedalboards">
+                        <span class="ps-hub-icon ps-hub-icon-pedalboards">P</span>
+                        <span class="ps-hub-text">
+                            <span class="ps-hub-label">Pedalboards</span>
+                            <span class="ps-hub-desc">Pedalboards available on Patchstorage</span>
+                        </span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- END PATCHSTORAGE HUB -->
+
     <!-- PATCHSTORAGE -->
     <div id="patchstorage-library" class="mod-hidden mod-init-hidden">
         <div>
             <header>
-                <h1 class="bottom top">PATCHSTORAGE (Beta)</h1>
+                <button type="button" class="js-ps-back ps-back-btn" title="Back to Patchstorage">Back</button>
+                <h1 class="bottom top">PATCHSTORAGE PLUGINS</h1>
                 <button class="status icon mod-bypass" id="patchstorage_update_all">Refresh</button>
             </header>
 
@@ -999,6 +1027,7 @@ $('document').ready(function() {
     <div id="patchstorage-pedalboards-library" class="mod-hidden mod-init-hidden">
         <div>
             <header>
+                <button type="button" class="js-ps-back ps-back-btn" title="Back to Patchstorage">Back</button>
                 <h1 class="bottom top">PATCHSTORAGE PEDALBOARDS</h1>
                 <button class="status icon mod-bypass" id="patchstorage_pedalboards_update_all">Refresh</button>
             </header>
