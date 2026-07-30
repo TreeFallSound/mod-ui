@@ -119,6 +119,9 @@ PATCHSTORAGE_ENABLED=bool(int(os.environ.get('PATCHSTORAGE_ENABLED', True)))
 PATCHSTORAGE_API_URL=os.environ.get('PATCHSTORAGE_API_URL', 'http://localhost/api/beta/patches')
 PATCHSTORAGE_PLATFORM_ID=os.environ.get('PATCHSTORAGE_PLATFORM_ID', 5027)
 PATCHSTORAGE_TARGET_ID=os.environ.get('PATCHSTORAGE_TARGET_ID', 5037)
+# Pedalboards on Patchstorage use "Other Platforms" and the "pedalboard" tag
+PATCHSTORAGE_PEDALBOARD_PLATFORM_ID=os.environ.get('PATCHSTORAGE_PEDALBOARD_PLATFORM_ID', 6223)  # "other platforms"
+PATCHSTORAGE_PEDALBOARD_TAG_ID=os.environ.get('PATCHSTORAGE_PEDALBOARD_TAG_ID', 12070)  # "pistomp"
 BLOKAS_ENABLED=bool(int(os.environ.get('BLOKAS_ENABLED', True)))
 BLOKAS_APT_PACKAGE=os.environ.get('BLOKAS_APT_PACKAGE', 'modep-mod-ui')
 BLOKAS_UPDATE_CHECK_URL=os.environ.get('BLOKAS_UPDATE_CHECK_URL', 'https://blokas.io/modep/version/v1/')
