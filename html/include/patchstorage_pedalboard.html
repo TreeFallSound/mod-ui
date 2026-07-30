@@ -1,0 +1,24 @@
+<div class="cloud-plugin plugin-container available-plugin js-available-effect" mod-role="cloud-plugin" mod-uri="{{uri}}">
+    <div class="cloud-plugin-border">
+        <figure class="thumb">
+            <img src="{{thumbnail_href}}" />
+        </figure>
+        <div class="description">
+            <span class="title">{{label}}</span>
+            <span class="author">{{brand}}</span>
+            <hr class="dotted" />
+            <p class="{{has_comment}}">{{comment}}<span class="limiter"></span></p>
+        </div>
+        <div class="status-container">
+            {{#download_count}}
+            <span class="status downloads" title="Pedalboard Downloads">&#129095; {{download_count}}</span>
+            {{/download_count}}
+            {{#state}}
+            <span class="status state {{state}}" title="Pedalboard State"></span>
+            {{/state}}
+            {{#status}}
+            <span class="status {{status}}" title="Pedalboard Status"></span>
+            {{/status}}
+        </div>
+    </div>
+</div>

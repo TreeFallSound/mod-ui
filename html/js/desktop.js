@@ -36,6 +36,8 @@ function Desktop(elements) {
         cloudPluginBoxTrigger: $('<div>'),
         patchstorageBox: $('<div>'),
         patchstorageBoxTrigger: $('<div>'),
+        patchstoragePedalboardsBox: $('<div>'),
+        patchstoragePedalboardsBoxTrigger: $('<div>'),
         pedalboardTrigger: $('<div>'),
         fileManagerBox: $('<div>'),
         fileManagerBoxTrigger: $('<div>'),
@@ -367,6 +369,7 @@ function Desktop(elements) {
         $('#plugins-library').css('z-index', -1)
         $('#cloud-plugins-library').css('z-index', -1)
         $('#patchstorage-library').css('z-index', -1)
+        $('#patchstorage-pedalboards-library').css('z-index', -1)
         $('#pedalboards-library').css('z-index', -1)
         $('#bank-library').css('z-index', -1)
         $('#main-menu').css('z-index', -1)
@@ -730,6 +733,9 @@ function Desktop(elements) {
                                                   elements.cloudPluginBoxTrigger)
     this.patchstorageBox = self.makePatchstorageBox(elements.patchstorageBox,
                                                   elements.patchstorageBoxTrigger)
+    this.patchstoragePedalboardsBox = self.makePatchstoragePedalboardsBox(
+                                                  elements.patchstoragePedalboardsBox,
+                                                  elements.patchstoragePedalboardsBoxTrigger)
     this.pedalboardBox = self.makePedalboardBox(elements.pedalboardBox,
                                                 elements.pedalboardBoxTrigger)
     this.bankBox = self.makeBankBox(elements.bankBox,
@@ -1272,6 +1278,7 @@ function Desktop(elements) {
     elements.bankBoxTrigger.statusTooltip()
     elements.cloudPluginBoxTrigger.statusTooltip()
     elements.patchstorageBoxTrigger.statusTooltip()
+    elements.patchstoragePedalboardsBoxTrigger.statusTooltip()
     elements.fileManagerBoxTrigger.statusTooltip()
 
     this.upgradeWindow = elements.upgradeWindow.upgradeWindow({
@@ -1743,6 +1750,78 @@ Desktop.prototype.makePatchstorageBox = function (el, trigger) {
             self.installationQueue.installUsingURI(uri, usingLabs, callback)
         }
     })
+}
+
+Desktop.prototype.makePatchstoragePedalboardsBox = function (el, trigger) {
+    var self = this
+
+    // Always bind to the live menu icon (not a possibly-empty jQuery selection from init time)
+    var menuTrigger = $('#main-menu #patchstorage-pedalboards')
+    if (!menuTrigger.length) {
+        menuTrigger = trigger
+    }
+
+    if (!$.fn.patchstoragePedalboardsBox) {
+        console.error('[patchstorage] patchstorage_pedalboards.js did not load ($.fn.patchstoragePedalboardsBox missing)')
+        menuTrigger.on('click.psPedalboards', function () {
+            new Notification('error', 'Patchstorage Pedalboards failed to load (JS missing)', 5000)
+        })
+        return el
+    }
+
+    if (!el || !el.length) {
+        console.error('[patchstorage] #patchstorage-pedalboards-library not found in DOM')
+        menuTrigger.on('click.psPedalboards', function () {
+            new Notification('error', 'Patchstorage Pedalboards panel missing from page', 5000)
+        })
+        return el
+    }
+
+    // Do not pass trigger into window() — we bind the menu icon ourselves below.
+    // Passing both causes open-then-close on a single click.
+    var box = el.patchstoragePedalboardsBox({
+        trigger: null,
+        windowManager: this.windowManager,
+        removePedalboard: function (bundle, callback) {
+            if (!confirm('Remove this pedalboard from the device?'))
+                return
+            $.ajax({
+                url: '/pedalboard/remove/',
+                data: {
+                    bundlepath: bundle
+                },
+                success: function (ok) {
+                    self.previousPedalboardList = null
+                    if (ok) {
+                        new Notification("info", "Pedalboard removed", 2000)
+                    }
+                    callback(ok)
+                },
+                error: function () {
+                    new Bug("Couldn't remove pedalboard")
+                },
+                cache: false,
+                dataType: 'json'
+            })
+        },
+        loadPedalboard: function (bundle, callback) {
+            self.loadPedalboard(bundle, function () {
+                callback(true)
+            })
+        }
+    })
+
+    // Store trigger for selected-state styling used by window open/close
+    el.data('trigger', menuTrigger)
+    menuTrigger.removeClass('selected')
+
+    menuTrigger.off('click.psPedalboards').on('click.psPedalboards', function () {
+        el.removeClass('mod-hidden')
+        el.window('toggle')
+        return false
+    })
+
+    return box
 }
 
 Desktop.prototype.makeBankBox = function (el, trigger) {

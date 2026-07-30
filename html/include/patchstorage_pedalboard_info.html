@@ -1,0 +1,72 @@
+<div class="js-close patchstorage-info patchstorage-pedalboard-info plugin-container" mod-uri="{{escaped_uri}}">
+    <div class="container box">
+        <div class="row-fluid clearfix">
+          <span class="js-close alignright btn btn-mini btn-danger">Close</span>
+            <div class="span10 offset1 clearfix">
+                <figure class="screenshot text-center">
+                    {{#state}}
+                    <div class="state {{state}}" title="{{state}}"></div>
+                    {{/state}}
+                    <img src="{{screenshot_href}}">
+                </figure>
+
+                <div class="plugin-description">
+                    <header>
+                      <h1 class="text-uppercase">{{name}}</h1>
+                        <p></p>
+                        <p>
+                            {{#category}}
+                            <b>Category:</b> {{category}}<br/>
+                            {{/category}}
+                            {{#tags}}
+                            <b>Tags:</b> {{tags}}<br/>
+                            {{/tags}}
+                            {{#uploader}}
+                            <b>Uploader:</b> <span style="text-transform: uppercase;">{{uploader}}</span><br/>
+                            {{#link}}
+                            <b>Link:</b> <a href="{{link}}" target="_blank">{{link}}</a><br/>
+                            {{/link}}
+                            {{/uploader}}
+                        </p>
+                        <p class="version">
+                            {{#cloud_revision}}
+                            <span class="js-latest-version">
+                                <span class="ps-label">P</span> Latest Revision: <span class="bold">{{cloud_revision}}</span><br/>
+                            </span>
+                            {{/cloud_revision}}
+                            {{#local_revision}}
+                            <span class="js-installed-version">
+                                <span class="ps-label">P</span> Installed Revision: <span class="bold">{{local_revision}}</span><br/>
+                            </span>
+                            {{/local_revision}}
+                            {{#download_count}}
+                            <span>
+                                <span class="ps-label">P</span> Downloads: <span class="bold">{{download_count}}</span><br/>
+                            </span>
+                            {{/download_count}}
+                            <table><tr><td>
+                            <button class="js-install btn btn-info btn-mini">Install</button>
+                            <button class="js-upgrade btn btn-info btn-mini">Update</button>
+                            <button class="js-remove btn btn-danger btn-mini">Remove</button>
+                            <button class="js-load btn btn-success btn-mini">Load</button>
+                            </td>
+                            </tr></table>
+                        </p>
+                    </header>
+                    <p></p>
+                    <p>{{comment}}</p>
+                    {{#url}}
+                    <a target="_blank" href="{{url}}" class="btn btn-info">
+                        <span>View on Patchstorage</span>
+                    </a>
+                    {{/url}}
+                    {{#donate_url}}
+                    <a target="_blank" href="{{donate_url}}" class="btn btn-info">
+                        <span>Donate to Author</span>
+                    </a>
+                    {{/donate_url}}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
