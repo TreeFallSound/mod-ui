@@ -1,17 +1,4 @@
-/* Patchstorage Pedalboards menu icon + header wiring (supplemental to main.css) */
-
-#main-menu #patchstorage-pedalboards {
-  background-image: url(../img/patchstorage-pedalboards-menu.png?v=1);
-  background-position: 0 top;
-  background-repeat: no-repeat;
-  transition: all .33s;
-  background-size: cover;
-}
-#main-menu #patchstorage-pedalboards:hover,
-#main-menu #patchstorage-pedalboards.selected {
-  background-color: #000;
-  background-position: 0 bottom;
-}
+/* Patchstorage hub + pedalboards library (supplemental to main.css) */
 
 #cloud_update_all,
 #patchstorage_update_all,
@@ -21,6 +8,7 @@
   font-size: 21px;
 }
 
+#patchstorage-hub header,
 #patchstorage-pedalboards-library header {
   display: block;
   left: 0;
@@ -39,6 +27,7 @@
   padding-left: 45px;
 }
 
+.blokas #patchstorage-hub header,
 .blokas #patchstorage-pedalboards-library header {
   background-image: none !important;
   padding-left: 10px !important;
@@ -51,4 +40,118 @@
 #patchstorage-pedalboards-library .ps-label {
   border: 1px solid #e53935;
   background: #e53935;
+}
+
+/* Back button shared by plugins / pedalboards pages */
+.ps-back-btn {
+  float: left;
+  margin: 8px 12px 0 0;
+  height: 28px;
+  line-height: 28px;
+  padding: 0 12px;
+  border: 1px solid #444;
+  border-radius: 2px;
+  background: #222;
+  color: #ddd;
+  font-size: 13px;
+  cursor: pointer;
+}
+.ps-back-btn:hover {
+  background: #000;
+  border-color: #03a9f4;
+  color: #fff;
+}
+
+/* Hub selection page */
+#patchstorage-hub {
+  background: #2c2c2c;
+  bottom: 45px;
+  left: 0;
+  overflow: auto;
+  position: fixed;
+  right: 0;
+  top: 0;
+  z-index: 2;
+}
+#patchstorage-hub h1 {
+  color: #fff;
+  display: inline-block;
+  font-size: 24px;
+  line-height: 35px;
+  margin: 0;
+  padding: 0;
+}
+#patchstorage-hub .ps-hub-content {
+  position: fixed;
+  top: 45px;
+  bottom: 45px;
+  left: 0;
+  right: 0;
+  padding: 48px 40px;
+  background: #111 url(../img/watermark.png) 100% 100% no-repeat;
+  overflow-y: auto;
+}
+#patchstorage-hub .ps-hub-intro {
+  color: #aaa;
+  font-size: 15px;
+  margin: 0 0 28px 0;
+  max-width: 520px;
+}
+#patchstorage-hub .ps-hub-assets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  max-width: 760px;
+}
+#patchstorage-hub .ps-hub-asset {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  width: 340px;
+  min-height: 96px;
+  padding: 18px 20px;
+  border: 1px solid #333;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.07);
+  color: #fff;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.25s, border-color 0.25s;
+}
+#patchstorage-hub .ps-hub-asset:hover {
+  background: #000;
+  border-color: #03a9f4;
+}
+#patchstorage-hub .ps-hub-icon {
+  flex: 0 0 48px;
+  width: 48px;
+  height: 48px;
+  line-height: 48px;
+  text-align: center;
+  font-size: 26px;
+  font-weight: 700;
+  border-radius: 4px;
+  color: #fff;
+}
+#patchstorage-hub .ps-hub-icon-plugins {
+  background: #03a9f4;
+}
+#patchstorage-hub .ps-hub-icon-pedalboards {
+  background: #e53935;
+}
+#patchstorage-hub .ps-hub-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+#patchstorage-hub .ps-hub-label {
+  font-size: 20px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+#patchstorage-hub .ps-hub-desc {
+  font-size: 13px;
+  color: #aaa;
+  line-height: 1.35;
 }
