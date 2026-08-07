@@ -3723,6 +3723,7 @@ class Host(object):
         if bundlepath:
             self.load_pb_snapshots(bundlepath)
             self.send_notmodified("state_load {}".format(bundlepath))
+            self.load_pb_parameters()
             self.addressings.load(bundlepath, instances, skippedPortAddressings, abort_catcher)
 
         if abort_catcher is not None and abort_catcher.get('abort', False):
@@ -3790,6 +3791,43 @@ class Host(object):
                 names.append(pbss['name'])
         else:
             self.snapshot_clear()
+
+    def load_pb_parameters(self):
+        # mod-host restores plugin patch parameters (NAM model files, IR paths, notes text, ...)
+        # from the bundle via "state_load", but it never tells us which values it restored.
+        # Our own cache is still holding the plugin defaults at this point, so the web UI would
+        # show an empty model until something else happens to send a patch_set (loading another
+        # snapshot and coming back, or the plugin voluntarily notifying its value).
+        # Seed the cache from the snapshot that is being loaded, which is what got saved into
+        # the plugin state files in the first place.
+        idx = self.current_pedalboard_snapshot_id
+
+        if idx < 0 or idx >= len(self.pedalboard_snapshots):
+            return
+
+        snapshot = self.pedalboard_snapshots[idx]
+        if snapshot is None:
+            return
+
+        for instance, data in snapshot['data'].items():
+            parameters = data.get('parameters', None)
+            if not parameters:
+                continue
+
+            instance = "/graph/%s" % instance
+            try:
+                instance_id = self.mapper.get_id_without_creating(instance)
+                pluginData  = self.plugins[instance_id]
+            except KeyError:
+                continue
+
+            for uri, param in parameters.items():
+                parameter = pluginData['parameters'].get(uri, None)
+                if parameter is None or parameter[0] == param[0]:
+                    continue
+
+                parameter[0] = param[0]
+                self.msg_callback("patch_set %s 1 %s %s %s" % (instance, uri, parameter[1], parameter[0]))
 
     def load_pb_plugins(self, plugins, instances, rinstances, motos):
         for p in plugins:
