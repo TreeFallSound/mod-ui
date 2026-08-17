@@ -570,12 +570,10 @@ class Host(object):
             return
 
         if self.midi_aggregated_mode:
-            # Connect the new hardware MIDI output to the merger input.
-            # The merger also does this in its own callback. connect_jack_ports
-            # is safe to repeat (EEXIST is not an error). Do not add the port
-            # to the graph; the graph shows only the merged ports.
-            if isOutput and name != "mod-midi-merger:in":
-                connect_jack_ports(name, "mod-midi-merger:in")
+            # New ports are ignored in aggregated mode. The merger JACK client
+            # owns the connection to mod-midi-merger:in (its port-registration
+            # callback plus a bounded reconcile burst). The graph shows only
+            # the merged ports.
             return
 
         alias = get_jack_port_alias(name)
