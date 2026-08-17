@@ -543,9 +543,10 @@ class Host(object):
         self.msg_callback("bufsize %i" % bufSize)
 
     def jack_port_appeared(self, name, isOutput):
-        name = charPtrToString(name)
-        isOutput = bool(isOutput)
+        # Public entry from the JACK port scan.
+        self._handle_port_appeared(charPtrToString(name), bool(isOutput), retries=6)
 
+    def _handle_port_appeared(self, name, isOutput, retries):
         if name.startswith(self.jack_slave_prefix+":"):
             name = name.replace(self.jack_slave_prefix+":","")
             if name.startswith("midi_"):
@@ -569,11 +570,20 @@ class Host(object):
             return
 
         if self.midi_aggregated_mode:
-            # new ports are ignored under midi aggregated mode
+            # Connect the new hardware MIDI output to the merger input.
+            # The merger also does this in its own callback. connect_jack_ports
+            # is safe to repeat (EEXIST is not an error). Do not add the port
+            # to the graph; the graph shows only the merged ports.
+            if isOutput and name != "mod-midi-merger:in":
+                connect_jack_ports(name, "mod-midi-merger:in")
             return
 
         alias = get_jack_port_alias(name)
         if not alias:
+            # The alias is not ready. Try again after a short delay.
+            if retries > 0:
+                IOLoop.instance().call_later(
+                    0.5, self._handle_port_appeared, name, isOutput, retries - 1)
             return
         alias = midi_port_alias_to_name(alias, True)
 
