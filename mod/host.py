@@ -4048,9 +4048,20 @@ class Host(object):
                     port_to_2   = self._fix_host_connection_port(port_to)
                 except:
                     continue
-                self.send_notmodified("connect %s %s" % (port_from_2, port_to_2))
-                self.connections.append((port_from, port_to))
-                self.msg_callback("connect %s %s" % (port_from, port_to))
+                # Record the connection only when mod-host confirms it. A port named
+                # in the pedalboard can be absent from JACK (a MIDI device that is not
+                # plugged in or not enabled), and an unconfirmed entry in
+                # self.connections is never retried: connect() short-circuits on it,
+                # and save() writes it to the pedalboard as a real arc.
+                def connected(ok, port_from=port_from, port_to=port_to):
+                    if not ok:
+                        print("ERROR: backend failed to connect ports: '%s' => '%s'" % (port_from, port_to))
+                        return
+                    self.connections.append((port_from, port_to))
+                    self.msg_callback("connect %s %s" % (port_from, port_to))
+
+                self.send_notmodified("connect %s %s" % (port_from_2, port_to_2),
+                                      connected, datatype='boolean')
 
             elif aliasname1 is not None or aliasname2 is not None:
                 for port_symbol, port_alias, port_conns in self.midiports:
