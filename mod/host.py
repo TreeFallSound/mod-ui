@@ -6933,13 +6933,18 @@ _:b%i
 
             # Remove USB MIDI ports
             for port_symbol, port_alias, port_conns in self.midiports:
-                self.remove_port_from_connections(port_symbol)
-
+                # port_symbol can be a combined "in;out" pair. Give each half to
+                # remove_port_from_connections separately: it matches against single
+                # JACK port names, so a combined symbol never matches and leaves
+                # self.connections holding edges that mod-host has already removed.
                 if ";" in port_symbol:
                     inp, outp = port_symbol.split(";",1)
+                    self.remove_port_from_connections(inp)
+                    self.remove_port_from_connections(outp)
                     self.msg_callback("remove_hw_port /graph/%s" % (inp.split(":",1)[-1]))
                     self.msg_callback("remove_hw_port /graph/%s" % (outp.split(":",1)[-1]))
                 else:
+                    self.remove_port_from_connections(port_symbol)
                     self.msg_callback("remove_hw_port /graph/%s" % (port_symbol.split(":",1)[-1]))
 
             self.midiports = []
