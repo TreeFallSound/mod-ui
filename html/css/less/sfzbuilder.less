@@ -1,0 +1,453 @@
+// pi-Stomp: SFZ Sound Bank Builder.
+// The layout follows banks.less: a fixed bank list on the left, a work area in the
+// middle and a source list on the right.
+
+#sfzbuilder-library {
+  position: absolute;
+  top: 0;
+  bottom: 45px;
+  left: 0;
+  right: 0;
+  overflow: hidden;
+  z-index: 2;
+  background: #111;
+
+  // main.less forces .form-control to 100% width. This panel uses bare controls,
+  // but the rule below keeps any future .form-control inside the panel in scale.
+  select,
+  input[type="text"],
+  input[type="search"],
+  input[type="number"] {
+    width: auto !important;
+    height: 24px;
+    padding: 0 6px;
+    box-sizing: border-box;
+    background: #222;
+    background-image: none;
+    color: #ddd;
+    border: 1px solid #444;
+    border-radius: 0;
+    box-shadow: none;
+    font-size: 12px;
+    line-height: 22px;
+    transition: border-color 0.33s;
+    &:focus {
+      border-color: @brand-primary;
+      outline: none;
+    }
+  }
+  input::selection {
+    background: @brand-primary;
+    color: #fff;
+  }
+
+  .btn {
+    height: 24px;
+    padding: 0 10px;
+    background: #333;
+    color: #ddd;
+    border: 1px solid #444;
+    border-radius: 0;
+    font-size: 11px;
+    font-weight: bold;
+    line-height: 22px;
+    text-transform: uppercase;
+    transition: all 0.33s;
+    &:hover {
+      background: @brand-warning;
+      border-color: @brand-warning;
+      color: #fff;
+    }
+    &:disabled,
+    &.disabled {
+      background: #1a1a1a;
+      border-color: #2c2c2c;
+      color: #555;
+      cursor: default;
+    }
+  }
+}
+
+/* LEFT: bank list */
+
+#sfzbuilder-banks {
+  position: absolute;
+  top: 45px;
+  bottom: 0;
+  left: 0;
+  width: 20%;
+  overflow-y: auto;
+  background: #2c2c2c;
+
+  .add-bank {
+    color: #fff;
+    cursor: pointer;
+    padding-left: 5px;
+    line-height: 32px;
+    text-transform: uppercase;
+    font-weight: bold;
+    transition: all 0.33s;
+    &:hover {
+      background: @brand-warning;
+    }
+    .icon-add {
+      display: inline-block;
+      width: 24px;
+      margin-right: 6px;
+      padding-left: 5px;
+      box-sizing: border-box;
+    }
+  }
+
+  .icon-add {
+    width: 1em;
+    height: 1em;
+    display: inline-block;
+    font-size: inherit;
+    vertical-align: baseline;
+    i {
+      position: absolute;
+      width: 1em;
+      margin-top: 0.3em;
+      border-top: 0.4em solid #888;
+    }
+    b {
+      position: absolute;
+      height: 1em;
+      margin-left: 0.3em;
+      border-left: 0.4em solid #888;
+    }
+  }
+
+  .bank-item {
+    display: block;
+    background: #222;
+    color: #888;
+    line-height: 32px;
+    height: 32px;
+    margin: 0 0 1px 0;
+    padding-left: 10px;
+    cursor: pointer;
+    font-weight: bold;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    transition: all 0.33s;
+    &:hover {
+      background: #000;
+      color: #fff;
+    }
+    &.selected {
+      background: @brand-primary;
+      color: #fff;
+    }
+    &.selected:hover {
+      background: #600E6F;
+    }
+  }
+
+  .new-bank {
+    width: 100% !important;
+    height: 32px !important;
+    margin: 0 0 1px 0;
+    padding-left: 10px;
+  }
+}
+
+/* MIDDLE: the pads */
+
+#sfzbuilder-pads {
+  position: absolute;
+  top: 45px;
+  bottom: 0;
+  left: 20%;
+  right: 30%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: #111;
+}
+
+#sfzbuilder-bank-title {
+  background: #111;
+  padding: 12px 20px 10px 20px;
+  border-bottom: 1px solid #2c2c2c;
+  h1 {
+    display: block;
+    margin: 0 0 10px 0;
+    padding: 0;
+    font-size: 2em;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .toolbar {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+    label {
+      margin: 0;
+      color: #bbb;
+      font-size: 11px;
+      font-weight: bold;
+      text-transform: uppercase;
+    }
+    input[type="number"] {
+      width: 56px !important;
+    }
+  }
+}
+
+#sfzbuilder-base-name {
+  color: @brand-warning;
+  font-size: 12px;
+  font-weight: bold;
+  min-width: 32px;
+}
+
+#sfzbuilder-status {
+  margin-left: 10px;
+  color: #bbb;
+  font-size: 12px;
+  &.error {
+    color: @brand-red;
+  }
+}
+
+#sfzbuilder-empty {
+  padding: 30px;
+  max-width: 520px;
+  color: #ccc;
+  h2 {
+    color: #fff;
+    font-size: 15px;
+    font-weight: bold;
+    text-transform: uppercase;
+    margin: 0 0 10px 0;
+  }
+  p {
+    font-size: 13px;
+    line-height: 1.6;
+  }
+}
+
+#sfzbuilder-slot-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+  padding: 20px;
+}
+
+.sfzbuilder-slot {
+  min-height: 64px;
+  padding: 8px;
+  box-sizing: border-box;
+  background: #1a1a1a;
+  border: 1px dashed #444;
+  cursor: pointer;
+  transition: border-color 0.33s, background-color 0.33s;
+
+  .slot-note {
+    display: block;
+    color: @brand-warning;
+    font-size: 11px;
+    font-weight: bold;
+  }
+  .slot-name {
+    display: block;
+    margin-top: 3px;
+    color: #fff;
+    font-size: 12px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .slot-empty {
+    display: block;
+    margin-top: 3px;
+    color: #666;
+    font-size: 12px;
+  }
+  .slot-controls {
+    display: none;
+    margin-top: 6px;
+    gap: 4px;
+    align-items: center;
+    flex-wrap: wrap;
+    label {
+      margin: 0;
+      color: #999;
+      font-size: 10px;
+      font-weight: normal;
+      text-transform: uppercase;
+    }
+    input[type="number"] {
+      width: 48px !important;
+      height: 20px !important;
+      font-size: 11px !important;
+    }
+    select {
+      height: 20px !important;
+      font-size: 11px !important;
+    }
+  }
+
+  &.filled {
+    background: rgba(255, 255, 255, 0.07);
+    border-style: solid;
+    border-color: @brand-primary;
+    .slot-controls {
+      display: flex;
+    }
+  }
+  &.selected {
+    border-color: @brand-warning;
+    box-shadow: inset 0 0 0 1px @brand-warning;
+  }
+  &.drop-hover {
+    background: @brand-primary;
+    border-style: solid;
+    border-color: @brand-warning;
+  }
+
+  .slot-remove {
+    float: right;
+    width: 16px;
+    height: 16px;
+    color: #888;
+    font-size: 14px;
+    font-weight: bold;
+    line-height: 14px;
+    text-align: center;
+    cursor: pointer;
+    &:hover {
+      color: @brand-red;
+    }
+  }
+}
+
+/* RIGHT: the samples */
+
+#sfzbuilder-samples {
+  position: absolute;
+  top: 45px;
+  bottom: 0;
+  right: 0;
+  width: 30%;
+  overflow: hidden;
+  background: #111;
+  border-left: 1px dotted #333;
+  display: flex;
+  flex-direction: column;
+}
+
+.sfzbuilder-samples-head {
+  padding: 12px 10px;
+  border-bottom: 1px solid #2c2c2c;
+  h2 {
+    margin: 0 0 8px 0;
+    color: #fff;
+    font-size: 15px;
+    font-weight: bold;
+    text-transform: uppercase;
+  }
+  select {
+    width: 100% !important;
+    margin-bottom: 6px;
+  }
+  input[type="search"] {
+    width: 100% !important;
+    margin-top: 6px;
+  }
+}
+
+// Hide the native file button. The label around it is the control.
+.sfzbuilder-file {
+  display: inline-block;
+  cursor: pointer;
+  margin: 0;
+  input[type="file"] {
+    display: none;
+  }
+}
+
+#sfzbuilder-sample-list {
+  flex: 1 1 auto;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+}
+
+.sfzbuilder-sample-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 8px;
+  margin-bottom: 1px;
+  color: #ccc;
+  background: rgba(255, 255, 255, 0.07);
+  cursor: -webkit-grab;
+  cursor: grab;
+  transition: all 0.33s;
+  &:active {
+    cursor: -webkit-grabbing !important;
+    cursor: grabbing !important;
+  }
+  &:hover {
+    background: @brand-primary;
+    color: #fff;
+  }
+}
+
+.sfzbuilder-sample-name {
+  flex: 1 1 auto;
+  font-size: 12px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+// Small play/stop button. It replaces the native <audio controls> element.
+.sfzbuilder-play {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  border: 1px solid #555;
+  border-radius: 50%;
+  color: #ccc;
+  font-size: 9px;
+  line-height: 18px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.33s;
+  &:before {
+    content: "\25B6";
+  }
+  &:hover {
+    border-color: @brand-warning;
+    color: @brand-warning;
+  }
+  &.playing {
+    border-color: @brand-warning;
+    color: @brand-warning;
+    &:before {
+      content: "\25A0";
+    }
+  }
+}
+
+.sfzbuilder-drag-helper {
+  height: 32px;
+  padding: 0 10px;
+  background: @brand-warning;
+  color: #fff;
+  font-size: 12px;
+  font-weight: bold;
+  line-height: 32px;
+  box-shadow: 0 5px 15px black;
+  opacity: 0.85;
+  z-index: 10000;
+}
