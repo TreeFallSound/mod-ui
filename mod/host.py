@@ -4106,6 +4106,13 @@ class Host(object):
 
             # create bundle path
             os.mkdir(bundlepath)
+
+            # pi-stomp extension: copy config.yml if it exists in the source pedalboard
+            if self.pedalboard_path:
+                config_src = os.path.join(self.pedalboard_path, "config.yml")
+                if os.path.isfile(config_src):
+                    shutil.copyfile(config_src, os.path.join(bundlepath, "config.yml"))
+
             self.pedalboard_path = bundlepath
 
         # save ttl
