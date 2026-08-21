@@ -2482,6 +2482,7 @@ class Host(object):
             valports = {}
             params = {}
             ranges = {}
+            trigger_ports = set()
 
             enabled_symbol = None
             freewheel_symbol = None
@@ -2494,9 +2495,10 @@ class Host(object):
                 valports[symbol] = port['ranges']['default']
                 ranges[symbol] = (port['ranges']['minimum'], port['ranges']['maximum'])
 
-                # skip notOnGUI controls
                 if "notOnGUI" in port['properties']:
                     badports.append(symbol)
+                elif "trigger" in port['properties']:
+                    trigger_ports.add(symbol)
 
                 # skip special designated controls
                 elif port['designation'] == "http://lv2plug.in/ns/lv2core#enabled":
@@ -2568,6 +2570,7 @@ class Host(object):
                 "ports"       : valports,
                 "parameters"  : params,
                 "ranges"      : ranges,
+                "trigger_ports": trigger_ports,
                 "badports"    : badports,
                 "designations": (enabled_symbol, freewheel_symbol, bpb_symbol, bpm_symbol, speed_symbol),
                 "outputs"     : dict((symbol, None) for symbol in extinfo['monitoredOutputs']),
@@ -3073,10 +3076,15 @@ class Host(object):
             if instance_id == PEDALBOARD_INSTANCE_ID:
                 continue
             instance = pluginData['instance'].replace("/graph/","",1)
+            ports = pluginData['ports'].copy()
+            # trigger ports are momentary actions, not scene state; force them to zero
+            for symbol in pluginData.get('trigger_ports', ()):
+                if symbol in ports:
+                    ports[symbol] = 0.0
             snapshot['data'][instance] = {
                 "bypassed"  : pluginData['bypassed'],
                 "parameters": dict((k,v.copy()) for k,v in pluginData['parameters'].items()),
-                "ports"     : pluginData['ports'].copy(),
+                "ports"     : ports,
                 "preset"    : pluginData['preset'],
                 "bpm"       : self.transport_bpm,
                 "bpb"       : self.transport_bpb,
@@ -3261,6 +3269,9 @@ class Host(object):
 
             for symbol, value in data['ports'].items():
                 if symbol in pluginData['designations']:
+                    continue
+                # trigger ports are momentary actions, never restored from snapshots
+                if symbol in pluginData.get('trigger_ports', ()):
                     continue
 
                 addressing = pluginData['addressings'].get(symbol, None)
@@ -3858,11 +3869,11 @@ class Host(object):
 
             instances[p['instance']] = (instance_id, p['uri'])
             rinstances[instance_id]  = instance
-
             badports = []
             valports = {}
             params = {}
             ranges = {}
+            trigger_ports = set()
 
             enabled_symbol = None
             freewheel_symbol = None
@@ -3875,10 +3886,10 @@ class Host(object):
                 valports[symbol] = port['ranges']['default']
                 ranges[symbol] = (port['ranges']['minimum'], port['ranges']['maximum'])
 
-                # skip notOnGUI controls
                 if "notOnGUI" in port['properties']:
                     badports.append(symbol)
-
+                elif "trigger" in port['properties']:
+                    trigger_ports.add(symbol)
                 # skip special designated controls
                 elif port['designation'] == "http://lv2plug.in/ns/lv2core#enabled":
                     enabled_symbol = symbol
@@ -3949,6 +3960,7 @@ class Host(object):
                 "ports"       : valports,
                 "parameters"  : params,
                 "ranges"      : ranges,
+                "trigger_ports": trigger_ports,
                 "badports"    : badports,
                 "designations": (enabled_symbol, freewheel_symbol, bpb_symbol, bpm_symbol, speed_symbol),
                 "outputs"     : dict((symbol, None) for symbol in extinfo['monitoredOutputs']),
@@ -3986,24 +3998,27 @@ class Host(object):
             for port in p['ports']:
                 symbol = port['symbol']
                 value  = port['value']
+                is_trigger = symbol in pluginData.get('trigger_ports', ())
 
-                oldValue = pluginData['ports'].get(symbol, None)
+                # Trigger ports are momentary actions, not persistent state.
+                # Skip restoring their value, but still register their MIDI map.
+                if not is_trigger:
+                    oldValue = pluginData['ports'].get(symbol, None)
+                    if oldValue is None:
+                        continue
 
-                if oldValue is None:
-                    continue
+                    if instance in motos:
+                        for motoSymbol, motoValue in motos[instance].items():
+                            if motoSymbol == symbol:
+                                value = motoValue
+                                break
 
-                if instance in motos:
-                    for motoSymbol, motoValue in motos[instance].items():
-                        if motoSymbol == symbol:
-                            value = motoValue
-                            break
+                    if oldValue != value:
+                        pluginData['ports'][symbol] = value
+                        self.send_notmodified("param_set %d %s %f" % (instance_id, symbol, value))
+                        self.msg_callback("param_set %s %s %f" % (instance, symbol, value))
 
-                if oldValue != value:
-                    pluginData['ports'][symbol] = value
-                    self.send_notmodified("param_set %d %s %f" % (instance_id, symbol, value))
-                    self.msg_callback("param_set %s %s %f" % (instance, symbol, value))
-
-                # don't address "bad" ports
+                # Don't address bad ports.
                 if symbol in badports:
                     continue
 
@@ -4173,10 +4188,15 @@ class Host(object):
             for instance_id in snapshot.pop('plugins_added'):
                 pluginData = self.plugins[instance_id]
                 instance   = pluginData['instance'].replace("/graph/","",1)
+                ports = pluginData['ports'].copy()
+                # trigger ports are momentary actions, not scene state; force them to zero
+                for symbol in pluginData.get('trigger_ports', ()):
+                    if symbol in ports:
+                        ports[symbol] = 0.0
                 snapshot['data'][instance] = {
                     "bypassed"  : pluginData['bypassed'],
                     "parameters": dict((k,v.copy()) for k,v in pluginData['parameters'].items()),
-                    "ports"     : pluginData['ports'].copy(),
+                    "ports"     : ports,
                     "preset"    : pluginData['preset'],
                 }
 
@@ -4312,7 +4332,10 @@ _:b%i
 """ % (instance, port['symbol'])
 
             # control input, save values
+            # trigger ports are momentary actions, not state; serialize as 0
             for symbol, value in pluginData['ports'].items():
+                if symbol in pluginData.get('trigger_ports', ()):
+                    value = 0.0
                 blocks += """
 <%s/%s>
     ingen:value %f ;%s
