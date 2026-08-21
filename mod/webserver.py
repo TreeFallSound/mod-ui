@@ -50,6 +50,12 @@ from mod import (
     get_hardware_descriptor, get_unique_name, symbolify,
 )
 from mod.bank import list_banks, save_banks, remove_pedalboard_from_banks
+from mod.sfzbuilder import (
+    AUDIO_EXTENSIONS, SFZ_NAME, SIDECAR_NAME,
+    sanitize_filename, unique_filename, list_banks as sfz_list_banks,
+    list_bank_samples, list_device_samples, list_usb_samples, create_bank, build_bank,
+    load_bank,
+)
 from mod.session import SESSION
 from modtools.utils import (
     kPedalboardInfoUserOnly, kPedalboardInfoFactoryOnly, kPedalboardInfoBoth,
@@ -2300,14 +2306,120 @@ class TokensSave(JsonRequestHandler):
 
         self.write(True)
 
+def _audio_file_entries(files):
+    return [
+        {'fullname': f, 'basename': os.path.basename(f)}
+        for f in files
+    ]
+
+class SfzBuilderBanks(JsonRequestHandler):
+    def get(self):
+        self.write({'ok': True, 'banks': sfz_list_banks()})
+
+class SfzBuilderBank(JsonRequestHandler):
+    def get(self):
+        try:
+            state = load_bank(self.get_argument('name', ''))
+        except ValueError as e:
+            self.write({'ok': False, 'error': str(e)})
+            return
+        state['ok'] = True
+        self.write(state)
+
+    @jsoncall
+    def post(self):
+        try:
+            path = create_bank(self.request.body.get('name'))
+        except ValueError as e:
+            self.write({'ok': False, 'error': str(e)})
+            return
+        self.write({'ok': True, 'name': os.path.basename(path)})
+
+class SfzBuilderSamples(JsonRequestHandler):
+    def get(self):
+        try:
+            files = list_bank_samples(self.get_argument('bank', ''))
+        except ValueError as e:
+            self.write({'ok': False, 'error': str(e)})
+            return
+        self.write({'ok': True, 'files': _audio_file_entries(files)})
+
+class SfzBuilderDevice(JsonRequestHandler):
+    def get(self):
+        try:
+            files = list_device_samples(self.get_argument('exclude_bank', None))
+        except ValueError as e:
+            self.write({'ok': False, 'error': str(e)})
+            return
+        self.write({'ok': True, 'files': _audio_file_entries(files)})
+
+class SfzBuilderUsb(JsonRequestHandler):
+    def get(self):
+        self.write({'ok': True, 'files': _audio_file_entries(list_usb_samples())})
+
+class SfzBuilderUpload(JsonRequestHandler):
+    def post(self):
+        try:
+            path = create_bank(self.get_argument('bank', ''))
+        except ValueError as e:
+            self.write({'ok': False, 'error': str(e)})
+            return
+
+        used = set(os.listdir(path))
+        saved = []
+        for upload in self.request.files.values():
+            for entry in upload:
+                filename = sanitize_filename(entry['filename'])
+                if not filename.lower().endswith(AUDIO_EXTENSIONS):
+                    self.write({'ok': False, 'error': 'not an audio file: %s' % entry['filename']})
+                    return
+                filename = unique_filename(filename, used)
+                with open(os.path.join(path, filename), 'wb') as fh:
+                    fh.write(entry['body'])
+                used.add(filename)
+                saved.append(filename)
+
+        self.write({'ok': True, 'files': saved})
+
+class SfzBuilderBuild(JsonRequestHandler):
+    @jsoncall
+    def post(self):
+        body = self.request.body
+        try:
+            result = build_bank(body.get('name'), body.get('base_note', 36), body.get('slots', []))
+        except ValueError as e:
+            self.write({'ok': False, 'error': str(e)})
+            return
+        self.write(result)
+
+class SfzBuilderAudio(web.StaticFileHandler):
+    def initialize(self):
+        web.StaticFileHandler.initialize(self, path='/')
+
+    @classmethod
+    def get_absolute_path(cls, root, path):
+        return path
+
+    # Tornado calls this with (root, absolute_path). The root is unused here,
+    # because get_absolute_path() above passes the full path straight through.
+    def validate_absolute_path(self, root, absolute_path):
+        absolute_path = os.path.realpath(absolute_path)
+
+        allowed = (os.path.realpath(USER_FILES_DIR), os.path.realpath('/media'))
+        if not any(absolute_path.startswith(base + os.sep) for base in allowed):
+            raise web.HTTPError(403, 'Access denied')
+
+        # This endpoint previews samples. It must not serve any other file.
+        if not absolute_path.lower().endswith(AUDIO_EXTENSIONS):
+            raise web.HTTPError(403, 'Not an audio file')
+
+        if not os.path.isfile(absolute_path):
+            raise web.HTTPError(404)
+
+        return absolute_path
+
 class FilesList(JsonRequestHandler):
-    complete_audiofile_exts = (
-        # through libsndfile
-        ".aif", ".aifc", ".aiff", ".au", ".bwf", ".flac", ".htk", ".iff", ".mat4", ".mat5", ".oga", ".ogg", ".opus",
-        ".paf", ".pvf", ".pvf5", ".sd2", ".sf", ".snd", ".svx", ".vcc", ".w64", ".wav", ".xi",
-        # extra through ffmpeg
-        ".3g2", ".3gp", ".aac", ".ac3", ".amr", ".ape", ".mp2", ".mp3", ".mpc", ".wma",
-    )
+    complete_audiofile_exts = AUDIO_EXTENSIONS
 
     hq_audiofile_exts = (
         ".aif", ".aifc", ".aiff", ".flac", ".w64", ".wav",
@@ -2491,6 +2603,16 @@ application = web.Application(
 
             # file listing etc
             (r"/files/list/?", FilesList),
+
+            # sfz sound-bank builder
+            (r"/sfzbuilder/banks/?", SfzBuilderBanks),
+            (r"/sfzbuilder/bank/?", SfzBuilderBank),
+            (r"/sfzbuilder/samples/?", SfzBuilderSamples),
+            (r"/sfzbuilder/device/?", SfzBuilderDevice),
+            (r"/sfzbuilder/usb/?", SfzBuilderUsb),
+            (r"/sfzbuilder/upload/?", SfzBuilderUpload),
+            (r"/sfzbuilder/audio/(.*)", SfzBuilderAudio),
+            (r"/sfzbuilder/build/?", SfzBuilderBuild),
 
             (r"/reset/?", DashboardClean),
 
