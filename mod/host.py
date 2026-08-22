@@ -543,9 +543,10 @@ class Host(object):
         self.msg_callback("bufsize %i" % bufSize)
 
     def jack_port_appeared(self, name, isOutput):
-        name = charPtrToString(name)
-        isOutput = bool(isOutput)
+        # Public entry from the JACK port scan.
+        self._handle_port_appeared(charPtrToString(name), bool(isOutput), retries=6)
 
+    def _handle_port_appeared(self, name, isOutput, retries):
         if name.startswith(self.jack_slave_prefix+":"):
             name = name.replace(self.jack_slave_prefix+":","")
             if name.startswith("midi_"):
@@ -569,11 +570,18 @@ class Host(object):
             return
 
         if self.midi_aggregated_mode:
-            # new ports are ignored under midi aggregated mode
+            # New ports are ignored in aggregated mode. The merger JACK client
+            # owns the connection to mod-midi-merger:in (its port-registration
+            # callback plus a bounded reconcile burst). The graph shows only
+            # the merged ports.
             return
 
         alias = get_jack_port_alias(name)
         if not alias:
+            # The alias is not ready. Try again after a short delay.
+            if retries > 0:
+                IOLoop.instance().call_later(
+                    0.5, self._handle_port_appeared, name, isOutput, retries - 1)
             return
         alias = midi_port_alias_to_name(alias, True)
 
@@ -6931,13 +6939,18 @@ _:b%i
 
             # Remove USB MIDI ports
             for port_symbol, port_alias, port_conns in self.midiports:
-                self.remove_port_from_connections(port_symbol)
-
+                # port_symbol can be a combined "in;out" pair. Give each half to
+                # remove_port_from_connections separately: it matches against single
+                # JACK port names, so a combined symbol never matches and leaves
+                # self.connections holding edges that mod-host has already removed.
                 if ";" in port_symbol:
                     inp, outp = port_symbol.split(";",1)
+                    self.remove_port_from_connections(inp)
+                    self.remove_port_from_connections(outp)
                     self.msg_callback("remove_hw_port /graph/%s" % (inp.split(":",1)[-1]))
                     self.msg_callback("remove_hw_port /graph/%s" % (outp.split(":",1)[-1]))
                 else:
+                    self.remove_port_from_connections(port_symbol)
                     self.msg_callback("remove_hw_port /graph/%s" % (port_symbol.split(":",1)[-1]))
 
             self.midiports = []
