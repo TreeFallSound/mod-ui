@@ -4948,6 +4948,11 @@ _:b%i
                     else:
                         pluginData['midiCCs'][portsymbol] = (-1, -1, 0.0, 1.0)
 
+                    # Clients other than the one that removed the addressing have no
+                    # other signal that the mapping is gone; -1:-1 is the same form
+                    # mod-host reports.
+                    self.msg_callback("midi_map %s %s -1 -1 0.0 1.0" % (instance, portsymbol))
+
                 else:
                     # Changing ranges without changing MIDI CC
                     if -1 in (channel, controller):
