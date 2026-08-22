@@ -1099,6 +1099,53 @@ function Desktop(elements) {
         })
     })
 
+    this.recordingElapsedTimer = null
+
+    elements.recorderButton.click(function () {
+        if (elements.recorderButton.hasClass('recording')) {
+            $.ajax({
+                url: '/recording/stop',
+                cache: false,
+                dataType: 'json',
+                success: function (resp) {
+                    if (!resp.ok) {
+                        new Notification('error', "Can't stop recording: " + resp.error, 3000)
+                    }
+                    // button state itself is driven by the "recording stop" WS echo
+                },
+                error: function () {
+                    new Notification('error', "Can't stop recording. Probably a connection problem.", 3000)
+                }
+            })
+        } else {
+            $.ajax({
+                url: '/recording/start',
+                cache: false,
+                dataType: 'json',
+                success: function (resp) {
+                    if (!resp.ok) {
+                        new Notification('error', "Can't start recording: " + resp.error, 3000)
+                    }
+                    // button state itself is driven by the "recording start" WS echo
+                },
+                error: function () {
+                    new Notification('error', "Can't start recording. Probably a connection problem.", 3000)
+                }
+            })
+        }
+    })
+
+    $.ajax({
+        url: '/recording/status',
+        cache: false,
+        dataType: 'json',
+        success: function (resp) {
+            if (resp.recording) {
+                self.setRecordingState(true, resp.filename, resp.elapsed)
+            }
+        }
+    })
+
     elements.shareButton.click(function () {
         var share = function () {
             if (self.pedalboardEmpty) {
@@ -1125,35 +1172,11 @@ function Desktop(elements) {
         }
     })
 
+    // The share-clip record/play/download flow below is dead: the endpoints it used
+    // (/recording/start,stop,play/*,download,reset) were repurposed for session recording
+    // (see the toolbar record button and RECORDINGS_DIR). Its markup (#record-step-*) in
+    // index.html is also unreachable and left in place, unused.
     elements.shareWindow.shareBox({
-        recordStart: ajaxFactory('/recording/start', "Can't record. Probably a connection problem."),
-        recordStop: ajaxFactory('/recording/stop', "Can't stop record. Probably a connection problem. Please try stopping again"),
-        playStart: function (startCallback, stopCallback) {
-            $.ajax({
-                url: '/recording/play/start',
-                success: function (resp) {
-                    $.ajax({
-                        url: '/recording/play/wait',
-                        success: stopCallback,
-                        error: function () {
-                            new Error("Couln't check when sample playing has ended")
-                        },
-                        cache: false,
-                        dataType: 'json'
-                    })
-                    startCallback(resp)
-                },
-                error: function () {
-                    new Error("Can't play. Probably a connection problem.")
-                },
-                cache: false,
-                dataType: 'json'
-            })
-        },
-        playStop: ajaxFactory('/recording/play/stop', "Can't stop playing. Probably a connection problem. Please try stopping again"),
-        recordDownload: ajaxFactory('/recording/download', "Can't download recording. Probably a connection problem."),
-        recordReset: ajaxFactory('/recording/reset', "Can't reset your recording. Probably a connection problem."),
-
         share: function (data, callback) {
             if (! data.reauthorized) {
                 // save user data
@@ -1856,6 +1879,39 @@ Desktop.prototype.setTrueBypassButton = function (channelName, state) {
     if (typeof state === "string") state = eval(state);
     var b = $("#mod-bypass" + channelName);
     b[(state ? "add" : "remove") + "Class"]("bypassed");
+}
+
+Desktop.prototype.setRecordingState = function (recording, filename, elapsedOrDuration) {
+    var button = $("#mod-recorder")
+
+    if (this.recordingElapsedTimer) {
+        clearInterval(this.recordingElapsedTimer)
+        this.recordingElapsedTimer = null
+    }
+
+    if (recording) {
+        var startedAt = Date.now() - (elapsedOrDuration || 0) * 1000
+
+        var updateElapsed = function () {
+            var secs = Math.floor((Date.now() - startedAt) / 1000)
+            var mm = Math.floor(secs / 60)
+            var ss = (secs % 60).toString().padStart(2, '0')
+            button.text(mm + ":" + ss)
+        }
+
+        button.addClass("recording")
+        updateElapsed()
+        this.recordingElapsedTimer = setInterval(updateElapsed, 1000)
+    } else {
+        button.removeClass("recording").text("Record")
+
+        if (filename) {
+            var url = '/recording/file/' + encodeURIComponent(filename)
+            new Notification('info',
+                "Recording saved (" + Math.round(elapsedOrDuration) + "s): " +
+                "<a href=\"" + url + "\" download>" + filename + "</a>", 8000)
+        }
+    }
 }
 
 Desktop.prototype.loadPedalboard = function (bundlepath, callback) {

@@ -22,7 +22,7 @@ What this software is **not**:
 - It is not a DAW. There is a basic recording endpoint in the server but no multitrack timeline, no arrangement view, no bouncing.
 - It is not a step sequencer or pattern editor.
 - It does not synthesize audio on its own — it hosts and connects LV2 plugins that you choose.
-- It does not manage the operating system, networking, or system updates (those live in pi-stomp and pistomp-arch).
+- It does not manage the operating system, networking, or system updates (those live in pi-stomp and pi-gen-pistomp).
 
 ---
 

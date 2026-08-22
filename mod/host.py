@@ -543,9 +543,10 @@ class Host(object):
         self.msg_callback("bufsize %i" % bufSize)
 
     def jack_port_appeared(self, name, isOutput):
-        name = charPtrToString(name)
-        isOutput = bool(isOutput)
+        # Public entry from the JACK port scan.
+        self._handle_port_appeared(charPtrToString(name), bool(isOutput), retries=6)
 
+    def _handle_port_appeared(self, name, isOutput, retries):
         if name.startswith(self.jack_slave_prefix+":"):
             name = name.replace(self.jack_slave_prefix+":","")
             if name.startswith("midi_"):
@@ -569,11 +570,18 @@ class Host(object):
             return
 
         if self.midi_aggregated_mode:
-            # new ports are ignored under midi aggregated mode
+            # New ports are ignored in aggregated mode. The merger JACK client
+            # owns the connection to mod-midi-merger:in (its port-registration
+            # callback plus a bounded reconcile burst). The graph shows only
+            # the merged ports.
             return
 
         alias = get_jack_port_alias(name)
         if not alias:
+            # The alias is not ready. Try again after a short delay.
+            if retries > 0:
+                IOLoop.instance().call_later(
+                    0.5, self._handle_port_appeared, name, isOutput, retries - 1)
             return
         alias = midi_port_alias_to_name(alias, True)
 
@@ -3726,6 +3734,7 @@ class Host(object):
         if bundlepath:
             self.load_pb_snapshots(bundlepath)
             self.send_notmodified("state_load {}".format(bundlepath))
+            self.load_pb_parameters()
             self.addressings.load(bundlepath, instances, skippedPortAddressings, abort_catcher)
 
         if abort_catcher is not None and abort_catcher.get('abort', False):
@@ -3793,6 +3802,43 @@ class Host(object):
                 names.append(pbss['name'])
         else:
             self.snapshot_clear()
+
+    def load_pb_parameters(self):
+        # mod-host restores plugin patch parameters (NAM model files, IR paths, notes text, ...)
+        # from the bundle via "state_load", but it never tells us which values it restored.
+        # Our own cache is still holding the plugin defaults at this point, so the web UI would
+        # show an empty model until something else happens to send a patch_set (loading another
+        # snapshot and coming back, or the plugin voluntarily notifying its value).
+        # Seed the cache from the snapshot that is being loaded, which is what got saved into
+        # the plugin state files in the first place.
+        idx = self.current_pedalboard_snapshot_id
+
+        if idx < 0 or idx >= len(self.pedalboard_snapshots):
+            return
+
+        snapshot = self.pedalboard_snapshots[idx]
+        if snapshot is None:
+            return
+
+        for instance, data in snapshot['data'].items():
+            parameters = data.get('parameters', None)
+            if not parameters:
+                continue
+
+            instance = "/graph/%s" % instance
+            try:
+                instance_id = self.mapper.get_id_without_creating(instance)
+                pluginData  = self.plugins[instance_id]
+            except KeyError:
+                continue
+
+            for uri, param in parameters.items():
+                parameter = pluginData['parameters'].get(uri, None)
+                if parameter is None or parameter[0] == param[0]:
+                    continue
+
+                parameter[0] = param[0]
+                self.msg_callback("patch_set %s 1 %s %s %s" % (instance, uri, parameter[1], parameter[0]))
 
     def load_pb_plugins(self, plugins, instances, rinstances, motos):
         for p in plugins:
@@ -6890,13 +6936,18 @@ _:b%i
 
             # Remove USB MIDI ports
             for port_symbol, port_alias, port_conns in self.midiports:
-                self.remove_port_from_connections(port_symbol)
-
+                # port_symbol can be a combined "in;out" pair. Give each half to
+                # remove_port_from_connections separately: it matches against single
+                # JACK port names, so a combined symbol never matches and leaves
+                # self.connections holding edges that mod-host has already removed.
                 if ";" in port_symbol:
                     inp, outp = port_symbol.split(";",1)
+                    self.remove_port_from_connections(inp)
+                    self.remove_port_from_connections(outp)
                     self.msg_callback("remove_hw_port /graph/%s" % (inp.split(":",1)[-1]))
                     self.msg_callback("remove_hw_port /graph/%s" % (outp.split(":",1)[-1]))
                 else:
+                    self.remove_port_from_connections(port_symbol)
                     self.msg_callback("remove_hw_port /graph/%s" % (port_symbol.split(":",1)[-1]))
 
             self.midiports = []

@@ -645,5 +645,17 @@ $('document').ready(function() {
             $("#mod-buffersize").text(bufsize+" frames")
             return
         }
+
+        if (cmd == "recording") {
+            data = data.split(" ")
+            var action = data[0]
+
+            if (action == "start") {
+                desktop.setRecordingState(true, data[1])
+            } else if (action == "stop") {
+                desktop.setRecordingState(false, data[1], parseFloat(data[2]))
+            }
+            return
+        }
     }
 })
