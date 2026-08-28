@@ -3641,6 +3641,9 @@ class Host(object):
                 continue
             self.msg_callback("add_hw_port /graph/%s midi 1 %s %i" % (symbol, name.replace(" ","_"), index))
 
+        if not self.midi_aggregated_mode:
+            self._disconnect_unwanted_hw_midi_ports()
+
         instances = {
             PEDALBOARD_INSTANCE: (PEDALBOARD_INSTANCE_ID, PEDALBOARD_URI)
         }
@@ -6985,6 +6988,28 @@ _:b%i
             self.remove_port_from_connections(self.midi_loopback_port)
             self.msg_callback("remove_hw_port /graph/midi_loopback")
 
+    # mod-host connects every physical MIDI capture port straight to its own midi_in on
+    # appearance (see ConnectToAllHardwareMIDIPorts/PortRegistration in mod-host), and
+    # mod-midi-merger appears to do the same for its own input -- neither has any concept
+    # of a device being excluded via our ports list, so an unchecked device must be
+    # disconnected after the fact rather than never connected in the first place.
+    def _disconnect_hw_port_from_host_midi_in(self, name):
+        disconnect_jack_ports(name, "mod-host:midi_in")
+        disconnect_jack_ports(name, "mod-midi-merger:in")
+
+    # Sweep every currently present hardware MIDI capture port and undo the host's/merger's
+    # auto-connect for any that aren't in the current enabled set. Needed at startup/load
+    # time because that auto-connect already ran before we ever get a chance to react to it.
+    def _disconnect_unwanted_hw_midi_ports(self):
+        enabled = set()
+        for port_symbol, _alias, _conns in self.midiports:
+            enabled.add(port_symbol.split(";", 1)[0] if ";" in port_symbol else port_symbol)
+
+        for name in get_jack_hardware_ports(False, False):
+            if name in enabled:
+                continue
+            self._disconnect_hw_port_from_host_midi_in(name)
+
     # Will remove or add new JACK ports (in mod-ui) as needed
     def set_midi_devices_separated(self, newDevs):
         def add_port(name, title, isOutput):
@@ -6997,6 +7022,8 @@ _:b%i
             self.msg_callback("add_hw_port /graph/%s midi %i %s %i" % (name.split(":",1)[-1], int(isOutput), title, index))
 
         def remove_port(name):
+            self._disconnect_hw_port_from_host_midi_in(name)
+
             removed_conns = []
 
             for ports in self.connections:
