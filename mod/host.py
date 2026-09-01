@@ -4919,6 +4919,20 @@ _:b%i
         # MIDI learn is not saved until a MIDI controller is moved.
         # So we need special casing for unlearn.
         if actuator_uri == kMidiUnlearnURI:
+            old_addressing = pluginData['addressings'].pop(portsymbol, None)
+            if old_addressing is not None:
+                self.addressings.remove(old_addressing)
+                self.pedalboard_modified = True
+
+            if portsymbol == ":bypass":
+                pluginData['bypassCC'] = (-1, -1)
+            else:
+                pluginData['midiCCs'][portsymbol] = (-1, -1, 0.0, 1.0)
+
+            # Clients other than the one that unlearned have no other signal that
+            # the mapping is gone; -1:-1 is the same form mod-host reports.
+            self.msg_callback("midi_map %s %s -1 -1 0.0 1.0" % (instance, portsymbol))
+
             self.send_modified("midi_unmap %d %s" % (instance_id, portsymbol), callback, datatype='boolean')
             return
 
@@ -4939,6 +4953,11 @@ _:b%i
                         pluginData['bypassCC'] = (-1, -1)
                     else:
                         pluginData['midiCCs'][portsymbol] = (-1, -1, 0.0, 1.0)
+
+                    # Clients other than the one that removed the addressing have no
+                    # other signal that the mapping is gone; -1:-1 is the same form
+                    # mod-host reports.
+                    self.msg_callback("midi_map %s %s -1 -1 0.0 1.0" % (instance, portsymbol))
 
                 else:
                     # Changing ranges without changing MIDI CC
