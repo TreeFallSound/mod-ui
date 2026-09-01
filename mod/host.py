@@ -4295,8 +4295,14 @@ _:b%i
         lv2:OutputPort .
 """ % (instance, port['symbol'])
 
-            # control input, save values
+            # control input, save values.
+            # use default for pprops:trigger ports (momentary; never save that)
+            triggers = dict((port['symbol'], port['ranges']['default'])
+                            for port in info['ports']['control']['input']
+                            if "trigger" in port['properties'])
+
             for symbol, value in pluginData['ports'].items():
+                value = triggers.get(symbol, value)
                 blocks += """
 <%s/%s>
     ingen:value %f ;%s
