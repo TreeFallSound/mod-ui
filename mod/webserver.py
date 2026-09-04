@@ -279,6 +279,29 @@ class TimelessStaticFileHandler(web.StaticFileHandler):
     def get_modified_time(self):
         return None
 
+class IslandStaticFileHandler(web.StaticFileHandler):
+    """
+    Serves html/js/app/, the directory of the islands.
+
+    index.html gives each of its own files a "?v=" query and the server gives
+    every static file a cache of one year. An island is different: it loads its
+    files with import() and with a <link> that it makes itself, so those files
+    carry no query. With a cache of one year the browser keeps an old file --
+    or keeps a 404 from a build before the file was there -- and the panel is
+    then empty and gives no other sign.
+
+    This handler asks the browser to check each time. The server answers 304 if
+    the file did not change, so the cost is one small request for each file.
+    """
+    def compute_etag(self):
+        # The default ETag of Tornado. The browser sends it back and the server
+        # answers 304 when the file is the same.
+        return web.StaticFileHandler.compute_etag(self)
+
+    def set_extra_headers(self, path):
+        # set_extra_headers runs after set_headers, so this value stays.
+        self.set_header("Cache-Control", "no-cache")
+
 class JsonRequestHandler(TimelessRequestHandler):
     def write(self, data):
         # FIXME: something is sending strings out, need to investigate what later..
@@ -2306,15 +2329,32 @@ class TokensSave(JsonRequestHandler):
 
         self.write(True)
 
+def _audio_file_size(path):
+    # A file can go away between the walk and this call. The panel then shows
+    # no size, which is not an error.
+    try:
+        return os.path.getsize(path)
+    except OSError:
+        return None
+
 def _audio_file_entries(files):
     return [
-        {'fullname': f, 'basename': os.path.basename(f)}
+        {'fullname': f, 'basename': os.path.basename(f), 'size': _audio_file_size(f)}
         for f in files
     ]
 
 class SfzBuilderBanks(JsonRequestHandler):
     def get(self):
-        self.write({'ok': True, 'banks': sfz_list_banks()})
+        banks = sfz_list_banks()
+        # The bank list shows how many samples each bank holds. The count comes
+        # from the same walk that the sample list uses.
+        counts = {}
+        for name in banks:
+            try:
+                counts[name] = len(list_bank_samples(name))
+            except (ValueError, OSError):
+                pass
+        self.write({'ok': True, 'banks': banks, 'counts': counts})
 
 class SfzBuilderBank(JsonRequestHandler):
     def get(self):
@@ -2643,6 +2683,9 @@ application = web.Application(
             (r"/([a-z]+\.html)$", TemplateHandler),
             (r"/(allguis|sdk|settings)$", TemplateHandler),
             (r"/load_template/([a-z_]+\.html)$", TemplateLoader),
+            # This route must come before the catch-all below. The islands
+            # need a different cache policy. See IslandStaticFileHandler.
+            (r"/js/app/(.*)", IslandStaticFileHandler, {"path": os.path.join(HTML_DIR, "js", "app")}),
             (r"/js/templates.js$", BulkTemplateLoader),
 
             (r"/websocket/?$", ServerWebSocket),

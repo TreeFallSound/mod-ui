@@ -1,0 +1,611 @@
+/* SPDX-FileCopyrightText: 2012-2023 MOD Audio UG
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * The stylesheet of the SFZ builder island.
+ *
+ * mount.js adds this file to the page. No other panel reads it and it reads no
+ * other panel. Thus you can delete the island directory and remove all of the
+ * feature.
+ *
+ * Every class starts with "sfz-". A modifier ends with "--". Thus a modifier
+ * can never collide with the class of an element, which was the cause of an
+ * earlier layout fault.
+ *
+ * Each rule starts at #sfzbuilder-library. main.css holds rules for bare
+ * elements (button, input, select, h2, ul). The identifier gives these rules a
+ * higher weight, so the panel keeps its appearance.
+ */
+
+/* Design tokens. Change a value here and the full panel follows.
+ *
+ * These live on :root, not on #sfzbuilder-library. jQuery UI puts the helper of
+ * a drag on the body, outside the panel, so a token on the panel does not reach
+ * it. A var() that does not resolve makes the property invalid, and the helper
+ * was then black text on nothing. Each name starts with --sfz-, so a token at
+ * the root cannot collide with the legacy styles. */
+:root {
+  --sfz-accent: #F29446;
+  --sfz-bg: #0a0a0a;
+  --sfz-panel: #0f0f0f;
+  --sfz-rail: #141414;
+  --sfz-cell: #151515;
+  --sfz-line: #262626;
+  --sfz-line-soft: #1c1c1c;
+  --sfz-line-free: #1f1f1f;
+  --sfz-text: #d8d8d8;
+  --sfz-dim: #6f6f6f;
+  --sfz-dimmer: #4a4a4a;
+  --sfz-err: #D91E36;
+  --sfz-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --sfz-sans: system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  --sfz-snap: 80ms;
+}
+
+#sfzbuilder-library {
+  position: absolute;
+  top: 0;
+  bottom: 45px;
+  left: 0;
+  right: 0;
+  overflow: hidden;
+  z-index: 2;
+  background: var(--sfz-bg);
+  color: var(--sfz-text);
+  font-family: var(--sfz-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}
+
+#sfzbuilder-library * { box-sizing: border-box; }
+
+/* The scroll bars.
+ *
+ * The panel is dark, but the browser draws a scroll bar and a form control from
+ * the setting of the system. On a system that is set to light, a white scroll
+ * bar cut through the bank list. color-scheme tells the browser which set to
+ * draw, so the panel gets the dark set on every system.
+ *
+ * scrollbar-color and scrollbar-width are the standard properties. The
+ * ::-webkit- rules give the same result on an older browser that does not
+ * have them, which the device can have. */
+#sfzbuilder-library {
+  color-scheme: dark;
+  scrollbar-width: thin;
+  scrollbar-color: var(--sfz-line) transparent;
+}
+#sfzbuilder-library *::-webkit-scrollbar { width: 10px; height: 10px; }
+#sfzbuilder-library *::-webkit-scrollbar-track { background: transparent; }
+#sfzbuilder-library *::-webkit-scrollbar-thumb {
+  background: var(--sfz-line);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+#sfzbuilder-library *::-webkit-scrollbar-thumb:hover { background: var(--sfz-dimmer); background-clip: content-box; }
+#sfzbuilder-library *::-webkit-scrollbar-corner { background: transparent; }
+
+#sfzbuilder-library button,
+#sfzbuilder-library input,
+#sfzbuilder-library select {
+  font-family: var(--sfz-mono);
+  font-variant-numeric: tabular-nums;
+  border-radius: 0;
+  box-shadow: none;
+  text-shadow: none;
+}
+
+/* The panel is a wrapper, not the root. window.js hides and shows the root
+   with jQuery, which writes an inline display value. A grid on the root would
+   fight that. */
+/* The shared header bar is 45px high and has position: fixed, so it draws over
+   the top of the panel. The panel starts below it. */
+#sfzbuilder-library .sfz-panel {
+  position: relative;
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr) 320px;
+  margin-top: 45px;
+  height: calc(100% - 45px);
+  background: var(--sfz-panel);
+}
+
+/* ---------- shared parts ---------- */
+
+#sfzbuilder-library .sfz-lbl {
+  font-size: 10px;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--sfz-dim);
+}
+
+#sfzbuilder-library .sfz-seg { display: inline-flex; border: 1px solid var(--sfz-line); }
+#sfzbuilder-library .sfz-seg button {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  border-right: 1px solid var(--sfz-line);
+  color: var(--sfz-dim);
+  padding: 7px 13px;
+  cursor: pointer;
+  font-size: 10px;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  transition: background var(--sfz-snap) linear, color var(--sfz-snap) linear;
+}
+#sfzbuilder-library .sfz-seg button:last-child { border-right: 0; }
+#sfzbuilder-library .sfz-seg button:hover { color: var(--sfz-text); background: var(--sfz-line-soft); }
+#sfzbuilder-library .sfz-seg button[aria-pressed="true"] { background: var(--sfz-accent); color: #000; }
+
+#sfzbuilder-library .sfz-btn {
+  appearance: none;
+  display: inline-block;
+  border: 1px solid var(--sfz-accent);
+  background: transparent;
+  color: var(--sfz-accent);
+  padding: 8px 18px;
+  margin: 0;
+  cursor: pointer;
+  font-size: 11px;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  font-weight: 700;
+  text-align: center;
+  transition: background var(--sfz-snap) linear, color var(--sfz-snap) linear;
+}
+#sfzbuilder-library .sfz-btn:hover { background: var(--sfz-accent); color: #000; }
+#sfzbuilder-library .sfz-btn:disabled,
+#sfzbuilder-library .sfz-btn.sfz-btn--off {
+  border-color: var(--sfz-line);
+  color: var(--sfz-dimmer);
+  cursor: default;
+  background: transparent;
+}
+
+/* The stepper: minus, a typed value, plus.
+   The panel has no bare number box. A number box is hard to hit on the small
+   screen of the device and gives no limit that you can see. */
+#sfzbuilder-library .sfz-step {
+  display: inline-flex;
+  border: 1px solid var(--sfz-line);
+  height: 26px;
+}
+#sfzbuilder-library .sfz-step button {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: var(--sfz-dim);
+  width: 26px;
+  flex: 0 0 26px;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 0;
+  transition: background var(--sfz-snap) linear, color var(--sfz-snap) linear;
+}
+#sfzbuilder-library .sfz-step button:hover { background: var(--sfz-accent); color: #000; }
+#sfzbuilder-library .sfz-step button:disabled { color: #2e2e2e; cursor: default; background: transparent; }
+#sfzbuilder-library .sfz-step input {
+  width: 46px;
+  height: 100%;
+  background: #000;
+  border: 0;
+  border-left: 1px solid var(--sfz-line);
+  border-right: 1px solid var(--sfz-line);
+  color: var(--sfz-text);
+  text-align: center;
+  font-size: 13px;
+  padding: 0;
+}
+#sfzbuilder-library .sfz-step input:focus { outline: none; color: var(--sfz-accent); }
+
+/* The small stepper of a pad. minmax(0,1fr) and width:0 keep it inside the pad
+   at six columns. A bare 1fr track has an automatic minimum of the content
+   width, which pushes the stepper past the edge. */
+#sfzbuilder-library .sfz-step--mini { height: 19px; width: 100%; min-width: 0; max-width: 100%; }
+#sfzbuilder-library .sfz-step--mini button { width: 16px; flex: 0 0 16px; font-size: 11px; }
+#sfzbuilder-library .sfz-step--mini input { flex: 1 1 0; width: 0; min-width: 0; font-size: 10px; padding: 0 2px; }
+
+/* The note token. The MIDI number and the note name have one appearance in
+   every place that shows them. */
+#sfzbuilder-library .sfz-note { display: inline-flex; align-items: baseline; gap: 7px; }
+#sfzbuilder-library .sfz-note .sfz-note-num { color: var(--sfz-dim); font-size: 15px; }
+#sfzbuilder-library .sfz-note .sfz-note-name { color: var(--sfz-accent); font-size: 15px; font-weight: 700; }
+#sfzbuilder-library .sfz-note--out .sfz-note-name { color: var(--sfz-err); }
+#sfzbuilder-library .sfz-step .sfz-note { padding: 0 12px; height: 24px; align-items: center; cursor: text; }
+#sfzbuilder-library .sfz-tokenbox {
+  display: inline-flex;
+  border-left: 1px solid var(--sfz-line);
+  border-right: 1px solid var(--sfz-line);
+  background: #000;
+}
+#sfzbuilder-library .sfz-step input.sfz-token-edit { width: 84px; border: 0; }
+
+/* ---------- the bank rail ---------- */
+
+#sfzbuilder-library .sfz-rail {
+  background: var(--sfz-rail);
+  border-right: 1px solid var(--sfz-line);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+#sfzbuilder-library .sfz-rail-head {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--sfz-line);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex: 0 0 auto;
+}
+#sfzbuilder-library .sfz-add {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: var(--sfz-accent);
+  cursor: pointer;
+  font-size: 11px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+#sfzbuilder-library .sfz-add:hover { text-decoration: underline; }
+#sfzbuilder-library .sfz-bank-list { overflow-y: auto; flex: 1; min-height: 0; }
+#sfzbuilder-library .sfz-bank {
+  padding: 11px 16px;
+  font-size: 14px;
+  cursor: pointer;
+  color: var(--sfz-dim);
+  border-left: 3px solid transparent;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  transition: background var(--sfz-snap) linear, color var(--sfz-snap) linear;
+}
+#sfzbuilder-library .sfz-bank:hover { background: #000; color: var(--sfz-text); }
+#sfzbuilder-library .sfz-bank-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#sfzbuilder-library .sfz-bank-count { font-size: 12px; color: var(--sfz-dimmer); flex: 0 0 auto; }
+#sfzbuilder-library .sfz-bank--on { background: var(--sfz-accent); color: #000; border-left-color: #000; font-weight: 700; }
+#sfzbuilder-library .sfz-bank--on .sfz-bank-count { color: #000; opacity: .65; }
+#sfzbuilder-library .sfz-new-bank {
+  width: 100%;
+  background: #000;
+  border: 1px solid var(--sfz-accent);
+  color: var(--sfz-text);
+  padding: 9px 14px;
+  font-size: 14px;
+}
+#sfzbuilder-library .sfz-new-bank:focus { outline: none; }
+
+/* ---------- the centre ---------- */
+
+#sfzbuilder-library .sfz-center { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+#sfzbuilder-library .sfz-head { padding: 14px 18px; border-bottom: 1px solid var(--sfz-line); flex: 0 0 auto; }
+#sfzbuilder-library .sfz-head-top { display: flex; align-items: flex-start; gap: 20px; margin-bottom: 10px; }
+#sfzbuilder-library .sfz-title {
+  margin: 0;
+  padding: 0;
+  font-size: 20px;
+  line-height: 1.4;
+  letter-spacing: .02em;
+  color: #fff;
+  font-weight: 700;
+  font-family: var(--sfz-mono);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#sfzbuilder-library .sfz-head-right { margin-left: auto; display: grid; justify-items: end; gap: 5px; flex: 0 0 auto; }
+#sfzbuilder-library .sfz-tools { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+#sfzbuilder-library .sfz-field { display: flex; gap: 6px; align-items: center; }
+#sfzbuilder-library .sfz-status {
+  margin-left: auto;
+  color: var(--sfz-dim);
+  font-family: var(--sfz-sans);
+  font-size: 13px;
+  letter-spacing: 0;
+  text-align: right;
+}
+#sfzbuilder-library .sfz-status--err { color: var(--sfz-err); }
+
+/* min-height:0 is needed. A flex child that scrolls has an automatic minimum
+   height of its content. Without this it grows past the panel and draws over
+   the page behind it. */
+#sfzbuilder-library .sfz-grid {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 14px 18px;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(var(--sfz-cols, 4), minmax(0, 1fr));
+  grid-auto-rows: minmax(150px, auto);
+  align-content: start;
+}
+
+/* ---------- a pad ---------- */
+
+#sfzbuilder-library .sfz-pad {
+  background: var(--sfz-cell);
+  min-width: 0;
+  border: 1px solid var(--sfz-line-soft);
+  padding: 14px 16px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: border-color var(--sfz-snap) linear, background var(--sfz-snap) linear;
+}
+#sfzbuilder-library .sfz-pad:hover { border-color: var(--sfz-dimmer); }
+
+/* Two columns. Column one holds the index on row one and the play control on
+   row two, so the play control uses the same space as the number. */
+#sfzbuilder-library .sfz-pad-head {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  column-gap: 8px;
+  row-gap: 3px;
+  align-items: baseline;
+}
+#sfzbuilder-library .sfz-pad-idx { grid-area: 1 / 1 / 2 / 2; color: var(--sfz-dim); font-size: 14px; }
+#sfzbuilder-library .sfz-pad-play {
+  grid-area: 2 / 1 / 3 / 2;
+  appearance: none;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: var(--sfz-dimmer);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+  width: 20px;
+  transition: color var(--sfz-snap) linear;
+}
+#sfzbuilder-library .sfz-pad-play:hover,
+#sfzbuilder-library .sfz-pad-play.sfz-playing { color: var(--sfz-accent); }
+#sfzbuilder-library .sfz-pad-meta { grid-area: 1 / 2 / 2 / 3; display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+#sfzbuilder-library .sfz-pad-clear {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin-left: auto;
+  color: var(--sfz-dimmer);
+  cursor: pointer;
+  font-size: 24px;
+  line-height: 12px;
+  transition: color var(--sfz-snap) linear;
+}
+#sfzbuilder-library .sfz-pad-clear:hover { color: var(--sfz-err); }
+#sfzbuilder-library .sfz-pad-file {
+  grid-area: 2 / 2 / 3 / 3;
+  font-size: 14px;
+  min-width: 0;
+  color: #fff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#sfzbuilder-library .sfz-pad-free {
+  font-size: 10px;
+  color: var(--sfz-dimmer);
+  letter-spacing: .16em;
+  margin: auto;
+  text-align: center;
+}
+
+/* One property on each line. This keeps a pad legible at six columns. */
+#sfzbuilder-library .sfz-props { display: grid; gap: 4px; margin-top: auto; min-width: 0; }
+#sfzbuilder-library .sfz-prop {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 5px;
+  align-items: center;
+  min-width: 0;
+}
+#sfzbuilder-library .sfz-prop .sfz-lbl { font-size: 8px; }
+#sfzbuilder-library .sfz-select {
+  width: 100%;
+  height: 19px;
+  font-size: 10px;
+  padding: 0 3px;
+  background: #000;
+  border: 1px solid var(--sfz-line);
+  color: var(--sfz-text);
+  transition: border-color var(--sfz-snap) linear;
+}
+#sfzbuilder-library .sfz-select:focus { outline: none; border-color: var(--sfz-accent); }
+
+#sfzbuilder-library .sfz-pad--empty { border-style: solid; border-color: var(--sfz-line-free); background: transparent; }
+#sfzbuilder-library .sfz-pad--filled { border-color: var(--sfz-line); }
+/* The pad that is selected gets a ring, not an inversion. A pad holds form
+   controls, so the ground must stay dark to keep them legible. */
+#sfzbuilder-library .sfz-pad--on {
+  border-color: var(--sfz-accent);
+  box-shadow: inset 0 0 0 1px var(--sfz-accent);
+  background: rgba(242, 148, 70, .07);
+}
+/* While a drag runs, each pad says that it can take the sample. Without this
+   you cannot see where to put the sample until you are already over a pad.
+   jQuery UI adds --target to every pad and --drop to the one under the
+   pointer. */
+#sfzbuilder-library .sfz-pad--target {
+  border-color: rgba(242, 148, 70, .55);
+  border-style: dashed;
+  background: rgba(242, 148, 70, .04);
+}
+#sfzbuilder-library .sfz-pad--target .sfz-pad-free { color: rgba(242, 148, 70, .75); }
+#sfzbuilder-library .sfz-pad--drop {
+  border-color: var(--sfz-accent);
+  border-style: solid;
+  box-shadow: inset 0 0 0 1px var(--sfz-accent);
+  background: rgba(242, 148, 70, .14);
+}
+#sfzbuilder-library .sfz-pad--drop .sfz-pad-free { color: var(--sfz-accent); font-weight: 700; }
+/* The row that you took the sample from. */
+#sfzbuilder-library .sfz-sample--dragging { background: #000; color: var(--sfz-dimmer); }
+
+/* ---------- no bank ---------- */
+
+#sfzbuilder-library .sfz-empty-state {
+  flex: 1;
+  display: grid;
+  place-content: center;
+  text-align: center;
+  gap: 14px;
+  padding: 30px;
+}
+#sfzbuilder-library .sfz-empty-state h3 {
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: .2em;
+  text-transform: uppercase;
+  color: var(--sfz-dim);
+  font-family: var(--sfz-mono);
+}
+#sfzbuilder-library .sfz-gesture {
+  display: flex;
+  gap: 26px;
+  justify-content: center;
+  color: var(--sfz-dimmer);
+  font-size: 10px;
+  letter-spacing: .1em;
+}
+#sfzbuilder-library .sfz-gesture div { display: grid; gap: 7px; justify-items: center; }
+#sfzbuilder-library .sfz-gesture .sfz-gesture-box {
+  width: 62px;
+  height: 42px;
+  border: 1px dashed #2c2c2c;
+  display: grid;
+  place-items: center;
+  color: var(--sfz-accent);
+  font-size: 16px;
+}
+
+/* ---------- the sample list ---------- */
+
+#sfzbuilder-library .sfz-samples {
+  border-left: 1px solid var(--sfz-line);
+  display: flex;
+  flex-direction: column;
+  background: var(--sfz-panel);
+  min-width: 0;
+  min-height: 0;
+}
+#sfzbuilder-library .sfz-samples-head {
+  padding: 14px 14px;
+  border-bottom: 1px solid var(--sfz-line);
+  display: grid;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+#sfzbuilder-library .sfz-search {
+  background: #000;
+  border: 1px solid var(--sfz-line);
+  color: var(--sfz-text);
+  padding: 7px 10px;
+  font-size: 13px;
+  width: 100%;
+}
+#sfzbuilder-library .sfz-search:focus { outline: none; border-color: var(--sfz-accent); }
+#sfzbuilder-library .sfz-upload { display: block; margin: 0; padding: 7px 10px; font-size: 10px; }
+#sfzbuilder-library .sfz-upload input { display: none; }
+#sfzbuilder-library .sfz-sample-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+#sfzbuilder-library .sfz-sample {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  cursor: grab;
+  color: var(--sfz-dim);
+  transition: background var(--sfz-snap) linear, color var(--sfz-snap) linear;
+}
+#sfzbuilder-library .sfz-sample:hover { background: #000; color: var(--sfz-text); }
+#sfzbuilder-library .sfz-sample-play {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: var(--sfz-dimmer);
+  width: 14px;
+  flex: 0 0 14px;
+  font-size: 12px;
+  cursor: pointer;
+}
+#sfzbuilder-library .sfz-sample:hover .sfz-sample-play,
+#sfzbuilder-library .sfz-sample-play.sfz-playing { color: var(--sfz-accent); }
+#sfzbuilder-library .sfz-sample-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-family: var(--sfz-sans);
+}
+#sfzbuilder-library .sfz-sample-size {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--sfz-dimmer);
+  flex: 0 0 auto;
+  padding-left: 6px;
+}
+#sfzbuilder-library .sfz-sample-none { padding: 14px; color: var(--sfz-dimmer); font-size: 12px; }
+
+/* The thing that you drag.
+   jQuery UI puts it on the body, outside the panel, so this rule cannot start
+   at #sfzbuilder-library. Each var() gives a value to fall back on, because
+   this element is the one that is furthest from the panel. */
+.sfz-drag-helper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 280px;
+  background: var(--sfz-accent, #F29446);
+  color: #000;
+  border: 1px solid #000;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .55);
+  font-family: var(--sfz-mono, Menlo, monospace);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 7px 12px;
+  pointer-events: none;
+  cursor: grabbing;
+  z-index: 10000;
+}
+.sfz-drag-helper .sfz-drag-mark { font-size: 13px; line-height: 1; flex: 0 0 auto; }
+.sfz-drag-helper .sfz-drag-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--sfz-sans, system-ui, sans-serif);
+  font-weight: 600;
+}
+
+/* ---------- the drop cover ---------- */
+
+#sfzbuilder-library .sfz-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: none;
+  background: rgba(0, 0, 0, .86);
+  border: 2px dashed var(--sfz-accent);
+  place-content: center;
+  text-align: center;
+  gap: 10px;
+  pointer-events: none;
+}
+#sfzbuilder-library .sfz-overlay--on { display: grid; }
+#sfzbuilder-library .sfz-overlay-big {
+  font-size: 15px;
+  letter-spacing: .24em;
+  text-transform: uppercase;
+  color: var(--sfz-accent);
+  font-weight: 700;
+}
+#sfzbuilder-library .sfz-overlay-sub { font-size: 10px; letter-spacing: .12em; color: var(--sfz-dim); }

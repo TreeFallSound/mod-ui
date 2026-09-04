@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SFZ builder browser smoke test</title>
+<!--
+  A smoke test for the SFZ builder island.
+
+  Run it with `make smoke`. That target copies this file into html/, serves
+  html/ and reads the result with headless Chrome. It needs no device and no
+  mod-ui server: the $.ajax below answers each request that the island makes.
+
+  What it proves:
+    * the island loads and draws its markup
+    * the stylesheet loads and reaches the panel
+    * a drag makes a helper that you can see, on the body, outside the panel
+    * a drag marks each pad that can take the sample
+    * a drop puts the sample on the pad
+
+  One rule for a new check: --virtual-time-budget does not advance a CSS
+  transition, so a property that transitions reads as the value that it started
+  from. The style element below stops the transitions for that reason. Read a
+  computed style only while that element is in the page.
+-->
+<link rel="stylesheet" href="css/main.css">
+<style id="no-transitions">#sfzbuilder-library, #sfzbuilder-library * { transition: none !important; }</style>
+<script src="js/lib/jquery-1.9.1.min.js"></script>
+<script src="js/lib/jquery-ui-1.10.1.custom.min.js"></script>
+</head>
+<body>
+<div id="wrapper"><div><div>
+  <div id="sfzbuilder-library" class="mod-hidden mod-init-hidden"></div>
+</div></div></div>
+<pre id="out"></pre>
+
+<script>
+var CHECKS = [], NOTES = [];
+function check(name, ok, detail) {
+  CHECKS.push((ok ? 'PASS  ' : 'FAIL  ') + name + (detail === undefined ? '' : '  [' + detail + ']'));
+}
+function note(){ NOTES.push([].join.call(arguments, ' ')); }
+window.onerror = function (m, s, l, c, e) { check('no script error', false, m + ' ' + ((e && e.stack) || '')); };
+window.addEventListener('unhandledrejection', function (e) {
+  check('no rejected promise', false, (e.reason && (e.reason.stack || e.reason.message)) || e.reason);
+});
+
+// The server, in miniature.
+$.ajax = function (o) {
+  var d = $.Deferred(), u = o.url;
+  setTimeout(function () {
+    if (u.indexOf('/sfzbuilder/banks') === 0) {
+      d.resolve({ ok: true, banks: ['Drumkit A', 'Foley'], counts: { 'Drumkit A': 6, 'Foley': 12 } });
+    } else if (u.indexOf('/sfzbuilder/bank') === 0) {
+      d.resolve({ ok: true, base_note: 36, slots: [] });
+    } else if (u.indexOf('/sfzbuilder/samples') === 0) {
+      d.resolve({ ok: true, files: [
+        { basename: 'Kick_01.wav', fullname: '/a/Kick_01.wav', size: 412000 },
+        { basename: 'Snare_Rim.wav', fullname: '/a/Snare_Rim.wav', size: 204000 }] });
+    } else {
+      d.resolve({ ok: true, files: [] });
+    }
+  }, 0);
+  return d.promise();
+};
+
+// The part of the legacy code that the seam needs.
+function JqueryClass(name, methods) {
+  $.fn[name] = function (m) {
+    if (typeof m === 'string' && methods[m]) { return methods[m].apply(this, [].slice.call(arguments, 1)); }
+    return methods.init.apply(this, arguments);
+  };
+}
+</script>
+<script src="js/window.js"></script>
+<script src="js/sfzbuilder.js"></script>
+<script>
+function fire(el, type, x, y) {
+  $(el).trigger($.Event(type, { which: 1, pageX: x, pageY: y, clientX: x, clientY: y }));
+}
+function finish() {
+  document.getElementById('out').textContent =
+    'SMOKE_START\n' + CHECKS.join('\n')
+    + (NOTES.length ? '\n--\n' + NOTES.join('\n') : '') + '\nSMOKE_END';
+}
+
+new WindowManager();
+$('#sfzbuilder-library').sfzBuilderBox({ trigger: null });
+
+setTimeout(function () {
+  var root = document.getElementById('sfzbuilder-library');
+  $(root).window('open');
+
+  setTimeout(function () {
+    var link = document.querySelector('link[data-sfzbuilder]');
+    check('the island adds its stylesheet', !!link);
+    var sheet = link && link.sheet;
+    check('the stylesheet loads', !!sheet && sheet.cssRules.length > 0,
+          sheet ? sheet.cssRules.length + ' rules' : 'no sheet');
+
+    var cs = getComputedStyle(root);
+    check('the panel fills the window', cs.position === 'absolute', cs.position);
+    check('the panel has its own ground', cs.backgroundColor === 'rgb(10, 10, 10)', cs.backgroundColor);
+
+    var header = root.querySelector('header');
+    check('the shared header bar is there', !!header);
+    if (header) {
+      var hs = getComputedStyle(header);
+      check('the header does not draw the MOD icon', hs.backgroundImage === 'none', hs.backgroundImage);
+      check('the header is 45px high', hs.height === '45px', hs.height);
+    }
+
+    check('the bank list has the banks', root.querySelectorAll('.sfz-bank').length === 2);
+    check('the sample list has the samples', root.querySelectorAll('.sfz-sample').length === 2);
+
+    var bank = root.querySelector('.sfz-bank');
+    if (bank) { bank.click(); }
+
+    setTimeout(function () {
+      var pads = root.querySelectorAll('.sfz-pad');
+      check('the pads are drawn', pads.length === 8, pads.length + ' pads');
+
+      var row = root.querySelector('.sfz-sample');
+      var pad = pads[1];
+      if (!row || !pad) { check('a row and a pad to drag between', false); finish(); return; }
+
+      var rr = row.getBoundingClientRect(), pr = pad.getBoundingClientRect();
+      fire(row, 'mousedown', rr.left + 10, rr.top + 8);
+      fire(document, 'mousemove', rr.left + 30, rr.top + 30);
+      fire(document, 'mousemove', pr.left + pr.width / 2, pr.top + pr.height / 2);
+
+      // The helper must be one that you can see. It goes on the body, where the
+      // tokens of the panel do not reach, so a var() without a value there made
+      // it black text on nothing.
+      var helper = document.querySelector('.sfz-drag-helper');
+      check('a drag makes a helper', !!helper);
+      if (helper) {
+        var hs2 = getComputedStyle(helper);
+        var box = helper.getBoundingClientRect();
+        check('the helper is on the body', helper.parentNode.tagName === 'BODY', helper.parentNode.tagName);
+        check('the helper has a ground you can see',
+              hs2.backgroundColor === 'rgb(242, 148, 70)', hs2.backgroundColor);
+        check('the helper has a size you can see', box.width > 60 && box.height > 20,
+              Math.round(box.width) + 'x' + Math.round(box.height));
+        check('the helper names the sample', helper.textContent.indexOf('Kick_01.wav') >= 0,
+              JSON.stringify(helper.textContent));
+      }
+
+      check('the row you drag from is marked', row.classList.contains('sfz-sample--dragging'));
+      check('every pad says it can take the sample',
+            root.querySelectorAll('.sfz-pad--target').length === 8,
+            root.querySelectorAll('.sfz-pad--target').length + ' marked');
+      check('the pad under the pointer is marked',
+            root.querySelectorAll('.sfz-pad--drop').length === 1);
+
+      var target = root.querySelector('.sfz-pad--target');
+      if (target) {
+        var ts = getComputedStyle(target);
+        check('a pad that can take the sample is drawn in the accent',
+              ts.borderTopColor === 'rgba(242, 148, 70, 0.55)', ts.borderTopColor);
+      }
+
+      fire(document, 'mouseup', pr.left + pr.width / 2, pr.top + pr.height / 2);
+      setTimeout(function () {
+        check('the drop puts the sample on the pad',
+              root.querySelectorAll('.sfz-pad--filled').length === 1);
+        check('the helper goes away', !document.querySelector('.sfz-drag-helper'));
+        var panel = root.querySelector('.sfz-panel');
+        note('panel columns:', getComputedStyle(panel).gridTemplateColumns);
+        note('colour scheme:', getComputedStyle(root).colorScheme);
+        finish();
+      }, 200);
+    }, 400);
+  }, 700);
+}, 300);
+</script>
+</body></html>
