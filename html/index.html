@@ -1122,64 +1122,10 @@ $('document').ready(function() {
     <!-- END FILE MANAGER -->
 
     <!-- SFZ SOUND BANK BUILDER -->
-    <div id="sfzbuilder-library" class="mod-hidden mod-init-hidden"><div class="box">
-        <header>
-            <h1 class="bottom top">Sound Bank Builder</h1>
-        </header>
-
-        <!-- BANK LIST -->
-        <div id="sfzbuilder-banks">
-            <div class="add-bank" id="sfzbuilder-add-bank"><span class="icon-add"><i></i><b></b></span>Add Bank</div>
-            <div id="sfzbuilder-bank-list"></div>
-        </div>
-        <!-- END BANK LIST -->
-
-        <!-- PADS -->
-        <div id="sfzbuilder-pads">
-            <div id="sfzbuilder-bank-title">
-                <h1>Untitled</h1>
-                <div class="toolbar">
-                    <label for="sfzbuilder-pad-count">Pads</label>
-                    <input id="sfzbuilder-pad-count" type="number" min="1" max="128" value="8" />
-                    <label for="sfzbuilder-base-note">Base note</label>
-                    <input id="sfzbuilder-base-note" type="number" min="0" max="127" value="36" />
-                    <span id="sfzbuilder-base-name">C2</span>
-                    <button id="sfzbuilder-build" class="btn">Build SFZ</button>
-                    <span id="sfzbuilder-status"></span>
-                </div>
-            </div>
-            <div id="sfzbuilder-slot-list"></div>
-            <div id="sfzbuilder-empty">
-                <h2>No sound bank is selected.</h2>
-                <p>
-                    Click "Add Bank" on the left side and give the bank a name.
-                    Then drag a sample from the right side onto a pad,
-                    or click a pad and then click a sample.
-                    Click "Build SFZ" to write the bank.
-                </p>
-            </div>
-        </div>
-        <!-- END PADS -->
-
-        <!-- SAMPLES -->
-        <div id="sfzbuilder-samples">
-            <div class="sfzbuilder-samples-head">
-                <h2>Samples</h2>
-                <select id="sfzbuilder-source">
-                    <option value="bank">Bank files</option>
-                    <option value="device">Device files</option>
-                    <option value="usb">USB files</option>
-                </select>
-                <label class="sfzbuilder-file btn">Upload
-                    <input id="sfzbuilder-upload" type="file" multiple accept="audio/*" />
-                </label>
-                <input id="sfzbuilder-search" type="search" placeholder="Filter by name" autocomplete="off" />
-            </div>
-            <ul id="sfzbuilder-sample-list"></ul>
-        </div>
-        <!-- END SAMPLES -->
-
-    </div></div>
+    <!-- The container is empty. html/js/app/sfzbuilder/ makes every element,
+         holds its own stylesheet and knows its own endpoints. See
+         docs/frontend-architecture.md, rule 4.3. -->
+    <div id="sfzbuilder-library" class="mod-hidden mod-init-hidden"></div>
     <!-- END SFZ SOUND BANK BUILDER -->
 
     <!-- MOD UPDATE/UPGRADE TOOLTIP -->

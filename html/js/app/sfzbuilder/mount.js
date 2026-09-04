@@ -1,0 +1,576 @@
+// SPDX-FileCopyrightText: 2012-2023 MOD Audio UG
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// @ts-check
+
+/**
+ * The SFZ builder island.
+ * The legacy code starts the island with `mount`. This is the only seam.
+ * @module
+ */
+
+import * as api from './api.js'
+import * as model from './model.js'
+import * as view from './view.js'
+import { createStore } from './state.js'
+import { toggleClass } from './dom.js'
+
+/** Where the browser keeps the column count between visits. */
+const COLS_KEY = 'sfzbuilder.cols'
+
+/**
+ * Adds the stylesheet of the island to the page, one time.
+ *
+ * The island holds its markup, its code and its style in one directory. Thus
+ * you can delete the directory and remove all of the feature.
+ */
+function addStylesheet() {
+    if (document.querySelector('link[data-sfzbuilder]')) {
+        return
+    }
+    const link = document.createElement('link')
+    link.rel = 'stylesheet'
+    link.type = 'text/css'
+    link.href = new URL('./sfzbuilder.css', import.meta.url).href
+    link.setAttribute('data-sfzbuilder', '1')
+    // The code can load while the stylesheet does not. The panel is then
+    // there but has no size and no place, so the screen does not change and
+    // the fault gives no other sign. Say it instead.
+    link.addEventListener('error', () => {
+        console.error('The Sound Bank Builder cannot read', link.href)
+        const root = document.getElementById('sfzbuilder-library')
+        if (root) {
+            root.setAttribute('style', 'position:absolute;top:0;bottom:45px;left:0;right:0;'
+                + 'z-index:2;background:#0a0a0a;color:#D91E36;padding:40px;font:13px monospace')
+            root.textContent = 'The Sound Bank Builder cannot read its stylesheet: ' + link.href
+        }
+    })
+    document.head.appendChild(link)
+}
+
+/**
+ * Reads the column count that the last visit used.
+ * A browser can refuse storage. The panel then uses the default.
+ * @returns {number}
+ */
+function readCols() {
+    try {
+        return model.clampCols(window.localStorage.getItem(COLS_KEY))
+    } catch (e) {
+        return model.DEFAULT_COLS
+    }
+}
+
+/** @param {number} cols */
+function writeCols(cols) {
+    try {
+        window.localStorage.setItem(COLS_KEY, String(cols))
+    } catch (e) {
+        /* The panel works without storage. */
+    }
+}
+
+/**
+ * Puts the SFZ builder in an element.
+ * @param {HTMLElement} root The panel element.
+ * @returns {{ open: () => void, close: () => void, destroy: () => void }}
+ */
+export function mount(root) {
+    addStylesheet()
+
+    const store = createStore(() => { /* the draws below are explicit */ })
+
+    // One player for the full panel, so only one sample sounds at a time.
+    /** @type {HTMLAudioElement|null} */
+    let player = null
+    /** @type {HTMLElement|null} */
+    let playingButton = null
+
+    const el = view.createLayout(root, {
+        onAddBank: () => view.promptNewBank(el, createBank),
+        onSource: setSource,
+        onUpload: uploadFromInput,
+        onSearch: (term) => {
+            store.update({ search: term })
+            drawSamples()
+        },
+        onPadCount: setPadCount,
+        onCols: setCols,
+        onBaseNote: setBaseNote,
+        onSave: save,
+    })
+
+    /**
+     * @param {string} message
+     * @param {boolean} [isError]
+     */
+    function setStatus(message, isError) {
+        store.update({ status: message, statusIsError: !!isError })
+        view.renderStatus(el, message, !!isError)
+    }
+
+    function stopPreview() {
+        if (player) {
+            player.pause()
+            player = null
+        }
+        if (playingButton) {
+            playingButton.classList.remove('sfz-playing')
+            playingButton.innerHTML = '&#9654;'
+            playingButton = null
+        }
+    }
+
+    /**
+     * @param {HTMLElement} button
+     * @param {string} fullname
+     */
+    function playPreview(button, fullname) {
+        const wasPlaying = button.classList.contains('sfz-playing')
+        stopPreview()
+        if (wasPlaying) {
+            return
+        }
+        player = new Audio(api.audioUrl(fullname))
+        playingButton = button
+        button.classList.add('sfz-playing')
+        button.innerHTML = '&#9632;'
+        player.addEventListener('ended', stopPreview)
+        player.addEventListener('error', () => {
+            stopPreview()
+            setStatus('Cannot play that sample', true)
+        })
+        player.play()
+    }
+
+    /**
+     * Gives the URL that plays the sample of a pad.
+     *
+     * A pad that comes from another place keeps the full path. A pad that comes
+     * from the bank keeps the name only, so the name goes to the file list of
+     * the bank. A bank that you did not open yet gives no URL and the play
+     * control of the pad is off.
+     * @param {import('./model.js').Slot} slot
+     * @returns {string}
+     */
+    function previewUrl(slot) {
+        if (slot.source) {
+            return slot.source
+        }
+        for (const f of store.get().bankFiles) {
+            if (f.basename === slot.sample) {
+                return f.fullname
+            }
+        }
+        return ''
+    }
+
+    function drawSlots() {
+        view.renderSlots(el, store.get(), {
+            onAssign: assignSlot,
+            onSelect: selectSlot,
+            onClear: clearSlot,
+            onPlay: playPreview,
+            previewUrl: previewUrl,
+        })
+    }
+
+    function drawSamples() {
+        view.renderSamples(el, store.get(), {
+            onPlay: playPreview,
+            onPick: pickSample,
+        })
+        // The old panel stopped the sound on every draw, so a filter cut the
+        // sample that played. The panel now stops only when the row goes away.
+        if (playingButton && !document.contains(playingButton)) {
+            stopPreview()
+        }
+    }
+
+    function drawBanks() {
+        view.renderBanks(el, store.get(), selectBank)
+    }
+
+    function drawBankView() {
+        view.renderBankView(el, store.get())
+    }
+
+    /** @param {number} idx */
+    function selectSlot(idx) {
+        const current = store.get().selectedSlot
+        store.update({ selectedSlot: current === idx ? -1 : idx })
+        drawSlots()
+    }
+
+    /** @param {number} idx */
+    function clearSlot(idx) {
+        const slots = store.get().slots.slice()
+        slots[idx] = null
+        store.update({ slots: slots })
+        drawSlots()
+    }
+
+    /**
+     * @param {number} idx
+     * @param {import('./model.js').SampleFile} entry
+     */
+    function assignSlot(idx, entry) {
+        const state = store.get()
+        if (idx < 0 || idx >= state.slots.length) {
+            return
+        }
+        const slots = state.slots.slice()
+        slots[idx] = model.slotFromSample(entry, state.source)
+        store.update({ slots: slots, selectedSlot: -1 })
+        setStatus(entry.basename + ' put on pad ' + (idx + 1))
+        drawSlots()
+    }
+
+    /** @param {import('./model.js').SampleFile} entry */
+    function pickSample(entry) {
+        const idx = store.get().selectedSlot
+        if (idx < 0) {
+            setStatus('Click a pad first, or drag the sample onto a pad', true)
+            return
+        }
+        assignSlot(idx, entry)
+    }
+
+    /** @param {number} count */
+    function setPadCount(count) {
+        const slots = store.get().slots
+        store.update({ padCount: count })
+        if (slots.length !== count) {
+            store.update({ slots: model.resizePads(slots, count) })
+        }
+        drawSlots()
+    }
+
+    /** @param {number} cols */
+    function setCols(cols) {
+        store.update({ cols: cols })
+        writeCols(cols)
+        el.grid.style.setProperty('--sfz-cols', String(cols))
+    }
+
+    /** @param {number|null} note */
+    function setBaseNote(note) {
+        store.update({ baseNote: model.clampBaseNote(note) })
+        drawSlots()
+    }
+
+    /** @param {string} source */
+    function setSource(source) {
+        store.update({ source: source })
+        drawBankView()
+        refreshSamples()
+    }
+
+    function refreshSamples() {
+        const state = store.get()
+        api.listSamples(state.source, state.currentBank).then((resp) => {
+            if (!resp.ok) {
+                setStatus(resp.error, true)
+                return
+            }
+            const files = resp.files || []
+            const patch = { files: files }
+            if (store.get().source === 'bank') {
+                // @ts-ignore - the patch takes both keys.
+                patch.bankFiles = files
+            }
+            store.update(patch)
+            drawSamples()
+            drawSlots()
+        }, () => setStatus('Failed to load the samples', true))
+    }
+
+    /**
+     * Reads the files of the current bank, whatever list the panel shows.
+     * The pads need this list to play a sample that the bank holds.
+     * @returns {Promise<void>}
+     */
+    function refreshBankFiles() {
+        const bank = store.get().currentBank
+        if (!bank) {
+            store.update({ bankFiles: [] })
+            return Promise.resolve()
+        }
+        return api.listSamples('bank', bank).then((resp) => {
+            if (resp.ok) {
+                store.update({ bankFiles: resp.files || [] })
+                drawSlots()
+            }
+        }, () => { /* The panel works without the play control of a pad. */ })
+    }
+
+    /** @returns {Promise<void>} */
+    function loadBanks() {
+        return api.listBanks().then((resp) => {
+            const banks = resp.banks
+            const current = store.get().currentBank
+            store.update({
+                banks: banks,
+                bankCounts: resp.counts || {},
+                currentBank: current && banks.indexOf(current) < 0 ? '' : current,
+            })
+            drawBanks()
+            drawBankView()
+        }, () => {
+            setStatus('Failed to load the banks', true)
+        })
+    }
+
+    // Reads the pad layout that the last save wrote, so a bank opens for edit.
+    function loadBankState() {
+        const bank = store.get().currentBank
+        if (!bank) {
+            return
+        }
+        api.loadBank(bank).then((resp) => {
+            if (!resp.ok) {
+                setStatus(resp.error, true)
+                return
+            }
+            const saved = resp.slots || []
+            if (saved.length === 0) {
+                drawSlots()
+                return
+            }
+            const aligned = model.alignSavedSlots(saved)
+            const baseNote = model.clampBaseNote(resp.base_note)
+            store.update({ slots: aligned, padCount: aligned.length, baseNote: baseNote })
+            el.padStepper.set(aligned.length)
+            el.baseStepper.set(baseNote)
+            drawSlots()
+        }, () => setStatus('Failed to load the bank', true))
+    }
+
+    /** @param {string} name */
+    function selectBank(name) {
+        if (store.get().currentBank === name) {
+            return
+        }
+        stopPreview()
+        store.update({ currentBank: name, selectedSlot: -1, bankFiles: [] })
+        drawBanks()
+        drawBankView()
+        setStatus('')
+        loadBankState()
+        refreshSamples()
+        if (store.get().source !== 'bank') {
+            refreshBankFiles()
+        }
+    }
+
+    /** @param {string} name */
+    function createBank(name) {
+        if (!name) {
+            setStatus('Type a bank name first', true)
+            return
+        }
+        api.createBank(name).then((resp) => {
+            if (!resp.ok) {
+                setStatus(resp.error, true)
+                return
+            }
+            store.update({ currentBank: '' })
+            loadBanks().then(() => selectBank(resp.name))
+        }, () => setStatus('Failed to create the bank', true))
+    }
+
+    function uploadFromInput() {
+        const files = el.uploadInput.files
+        if (!files || files.length === 0) {
+            return
+        }
+        const list = Array.prototype.slice.call(files)
+        el.uploadInput.value = ''
+        upload(list)
+    }
+
+    /**
+     * Sends files to the current bank.
+     * @param {File[]} files
+     */
+    function upload(files) {
+        const bank = store.get().currentBank
+        if (!bank) {
+            setStatus('Select a bank first', true)
+            return
+        }
+        // The server refuses the full batch if one file is not audio, and it
+        // refuses it after it writes the files before that one. Thus the panel
+        // removes those files first. A drop from the desktop has no filter.
+        const split = model.splitAudioFiles(files)
+        if (split.accepted.length === 0) {
+            setStatus('No audio file in that drop', true)
+            return
+        }
+        setStatus('Uploading ' + split.accepted.length + ' file(s)…')
+        api.uploadSamples(bank, split.accepted).then((resp) => {
+            if (!resp.ok) {
+                setStatus(resp.error, true)
+                return
+            }
+            const skipped = split.rejected.length
+            setStatus(resp.files.length + ' file(s) uploaded'
+                + (skipped ? ', ' + skipped + ' not audio' : ''), skipped > 0)
+            store.update({ source: 'bank' })
+            drawBankView()
+            refreshSamples()
+            loadBanks()
+        }, () => setStatus('Upload failed', true))
+    }
+
+    function save() {
+        const state = store.get()
+        if (!state.currentBank) {
+            setStatus('Select a bank first', true)
+            return
+        }
+        const payload = model.buildPayload(state.slots)
+        if (payload.filled === 0) {
+            setStatus('Put a sample on a pad first', true)
+            return
+        }
+        api.buildBank(state.currentBank, state.baseNote, payload.aligned).then((resp) => {
+            if (!resp.ok) {
+                setStatus(resp.error, true)
+                return
+            }
+            setStatus('Saved ' + resp.file + ' with ' + resp.count + ' sample(s)')
+            refreshBankFiles()
+        }, () => setStatus('Save failed', true))
+    }
+
+    // ---- the drop of a file from the desktop ----------------------------
+    //
+    // This is not the same as the drag of a sample onto a pad. That drag uses
+    // jQuery UI, which reads mouse events. A drop from the desktop uses the
+    // drag events of the browser and carries a `dataTransfer`. The code below
+    // acts on a drop that holds files only, so an internal drag goes through.
+
+    let dragDepth = 0
+
+    /**
+     * @param {DragEvent} e
+     * @returns {boolean}
+     */
+    function holdsFiles(e) {
+        const types = e.dataTransfer ? e.dataTransfer.types : null
+        if (!types) {
+            return false
+        }
+        return Array.prototype.indexOf.call(types, 'Files') >= 0
+    }
+
+    /** @param {boolean} on */
+    function showOverlay(on) {
+        toggleClass(el.overlay, 'sfz-overlay--on', on)
+    }
+
+    el.panel.addEventListener('dragenter', (/** @type {any} */ e) => {
+        if (!holdsFiles(e)) {
+            return
+        }
+        e.preventDefault()
+        // A drag over a child element sends a leave and then an enter. The
+        // count keeps the cover until the drag goes past the panel itself.
+        dragDepth++
+        showOverlay(true)
+    })
+
+    el.panel.addEventListener('dragover', (/** @type {any} */ e) => {
+        if (!holdsFiles(e)) {
+            return
+        }
+        e.preventDefault()
+        if (e.dataTransfer) {
+            e.dataTransfer.dropEffect = 'copy'
+        }
+    })
+
+    el.panel.addEventListener('dragleave', (/** @type {any} */ e) => {
+        if (!holdsFiles(e)) {
+            return
+        }
+        dragDepth = Math.max(0, dragDepth - 1)
+        if (dragDepth === 0) {
+            showOverlay(false)
+        }
+    })
+
+    el.panel.addEventListener('drop', (/** @type {any} */ e) => {
+        if (!holdsFiles(e)) {
+            return
+        }
+        e.preventDefault()
+        dragDepth = 0
+        showOverlay(false)
+        const files = e.dataTransfer ? Array.prototype.slice.call(e.dataTransfer.files) : []
+        if (files.length > 0) {
+            upload(files)
+        }
+    })
+
+    // A drop outside the panel must not make the browser open the file.
+    /** @param {DragEvent} e */
+    function blockOutside(e) {
+        if (holdsFiles(e) && !el.panel.contains(/** @type {Node} */ (e.target))) {
+            e.preventDefault()
+        }
+    }
+    /** @param {DragEvent} e */
+    function blockOutsideDrop(e) {
+        if (holdsFiles(e) && !el.panel.contains(/** @type {Node} */ (e.target))) {
+            e.preventDefault()
+            dragDepth = 0
+            showOverlay(false)
+        }
+    }
+    let guarded = false
+
+    function addGuards() {
+        if (!guarded) {
+            guarded = true
+            document.addEventListener('dragover', blockOutside)
+            document.addEventListener('drop', blockOutsideDrop)
+        }
+    }
+
+    function removeGuards() {
+        if (guarded) {
+            guarded = false
+            document.removeEventListener('dragover', blockOutside)
+            document.removeEventListener('drop', blockOutsideDrop)
+        }
+    }
+
+    // ---- the seam --------------------------------------------------------
+
+    function refreshAll() {
+        addGuards()
+        loadBanks().then(() => {
+            refreshSamples()
+            drawSlots()
+        })
+    }
+
+    function onClose() {
+        stopPreview()
+        dragDepth = 0
+        showOverlay(false)
+        removeGuards()
+    }
+
+    setCols(readCols())
+    el.colStepper.set(store.get().cols)
+    setPadCount(store.get().padCount)
+    drawBankView()
+
+    return {
+        open: refreshAll,
+        close: onClose,
+        destroy: onClose,
+    }
+}
