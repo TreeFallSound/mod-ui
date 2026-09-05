@@ -56,10 +56,11 @@ test('noteToken marks a note above 127 as out of range', () => {
     assert.deepEqual(model.noteToken(128), { note: 128, name: '--', inRange: false })
 })
 
-test('clampCols keeps the count from 2 to 6', () => {
+test('clampCols keeps the count from 2 to 8', () => {
     assert.equal(model.clampCols('4'), 4)
     assert.equal(model.clampCols(1), 2)
-    assert.equal(model.clampCols(99), 6)
+    assert.equal(model.clampCols(8), 8)
+    assert.equal(model.clampCols(99), 8)
     assert.equal(model.clampCols(null), model.DEFAULT_COLS)
     assert.equal(model.clampCols('abc'), model.DEFAULT_COLS)
 })
