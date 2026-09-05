@@ -45,7 +45,7 @@ export const DEFAULT_PADS = 8
 export const MIN_PADS = 1
 export const MAX_PADS = 128
 export const MIN_COLS = 2
-export const MAX_COLS = 6
+export const MAX_COLS = 8
 export const DEFAULT_COLS = 4
 
 /**

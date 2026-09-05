@@ -677,7 +677,7 @@ function padIndex(idx) {
 
 /**
  * Makes the gain, root and loop controls of one pad.
- * One control on each line. This keeps a pad legible at six columns.
+ * One control on each line. This keeps a pad legible at eight columns.
  *
  * A control sends the index of its pad and the one field it changed, never the
  * pad object it was drawn from. The pads are not drawn again while you edit --
