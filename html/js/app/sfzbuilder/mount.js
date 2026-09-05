@@ -148,6 +148,14 @@ export function mount(root) {
      * bank is, and it lives in the browser rather than on the device.
      */
     function markDirty() {
+        // No bank open means no work to lose. The panel builds its first pads
+        // before it has asked the server for anything -- setPadCount below
+        // grows the empty array to eight -- and that is the panel arranging
+        // itself, not a change to a bank. Without this test the first bank the
+        // panel opened asked whether to drop work that never existed.
+        if (!store.get().currentBank) {
+            return
+        }
         if (store.get().dirty) {
             return
         }

@@ -141,6 +141,11 @@ setTimeout(function () {
   $(root).window('open');
 
   setTimeout(function () {
+    // Opening the panel asks nothing. There is no bank open yet and thus no
+    // work to lose, so any question here is the panel asking about itself.
+    check('opening the panel asks no question', CONFIRM_ASKED === '',
+          JSON.stringify(CONFIRM_ASKED));
+
     var link = document.querySelector('link[data-sfzbuilder]');
     check('the island adds its stylesheet', !!link);
     var sheet = link && link.sheet;
