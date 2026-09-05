@@ -62,7 +62,11 @@ $.ui.intersect = function(draggable, droppable, toleranceMode) {
     case "pointer":
         draggableLeft = ((draggable.positionAbs || draggable.position.absolute).left + (draggable.clickOffset || draggable.offset.click).left);
         draggableTop = ((draggable.positionAbs || draggable.position.absolute).top + (draggable.clickOffset || draggable.offset.click).top);
-        return isOverAxis( draggableTop, t, droppable.proportions().height ) && isOverAxis( draggableLeft, l, droppable.proportions().width );
+        // isOverAxis() is private to the jQuery UI closure, and proportions is a
+        // property here and not a function. Both are inlined below.
+        // isOverAxis(x, ref, size) is (x >= ref && x < ref + size), and b/r above
+        // are already t + height and l + width.
+        return (draggableTop >= t && draggableTop < b) && (draggableLeft >= l && draggableLeft < r);
     case "touch":
         return (
             (y1 >= t && y1 <= b) ||	// Top edge touching

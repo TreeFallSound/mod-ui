@@ -39,6 +39,8 @@ function Desktop(elements) {
         pedalboardTrigger: $('<div>'),
         fileManagerBox: $('<div>'),
         fileManagerBoxTrigger: $('<div>'),
+        sfzBuilderBox: $('<div>'),
+        sfzBuilderBoxTrigger: $('<div>'),
         pedalboardBox: $('<div>'),
         pedalboardBoxTrigger: $('<div>'),
         bankBox: $('<div>'),
@@ -736,6 +738,8 @@ function Desktop(elements) {
                                     elements.bankBoxTrigger)
     this.fileManagerBox = self.makeFileManagerBox(elements.fileManagerBox,
                                                   elements.fileManagerBoxTrigger)
+    this.sfzBuilderBox = self.makeSfzBuilderBox(elements.sfzBuilderBox,
+                                                elements.sfzBuilderBoxTrigger)
 
     this.getPluginsData = function (uris, callback) {
         $.ajax({
@@ -1296,6 +1300,7 @@ function Desktop(elements) {
     elements.cloudPluginBoxTrigger.statusTooltip()
     elements.patchstorageBoxTrigger.statusTooltip()
     elements.fileManagerBoxTrigger.statusTooltip()
+    elements.sfzBuilderBoxTrigger.statusTooltip()
 
     this.upgradeWindow = elements.upgradeWindow.upgradeWindow({
         icon: elements.upgradeIcon,
@@ -1826,6 +1831,13 @@ Desktop.prototype.makeBankBox = function (el, trigger) {
 Desktop.prototype.makeFileManagerBox = function (el, trigger) {
     var self = this
     el.fileManagerBox({
+        trigger: trigger,
+        windowManager: this.windowManager,
+    })
+}
+
+Desktop.prototype.makeSfzBuilderBox = function (el, trigger) {
+    return el.sfzBuilderBox({
         trigger: trigger,
         windowManager: this.windowManager,
     })

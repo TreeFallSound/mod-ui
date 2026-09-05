@@ -1,0 +1,16 @@
+{
+  "//": "Type checking only. See docs/frontend-architecture.md rule 4.4. No build output.",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "strict": true,
+    "noImplicitAny": false,
+    "skipLibCheck": true
+  },
+  "include": ["html/js/app/**/*.js"]
+}
