@@ -1842,6 +1842,15 @@ class Host(object):
                             except Exception as e:
                                 logging.exception(e)
 
+        elif cmd == "beat_sync":
+            # t_us bpm bpb beat_in_bar flags — a clock sample (t_us=now).
+            # Refer to mod-host src/effects.c.
+            fields = data.split()
+            if len(fields) != 5:
+                logging.warning("[host] malformed beat_sync: %r", data)
+                return
+            self.msg_callback("beat_sync %s %s %s %s %s" % tuple(fields))
+
         elif cmd == "log":
             ltype, lmsg = data.split(" ", 1)
             self.msg_callback("log " + data)

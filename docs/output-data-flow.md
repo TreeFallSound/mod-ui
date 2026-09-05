@@ -9,6 +9,59 @@ mod-host continuously produces two kinds of feedback on its read socket (port 55
 
 These share the same socket and the same flow-control mechanism.
 
+## A Plugin Cannot Write to Its Own Input Port
+
+A plugin must not write to an input port. The host owns the buffer of an
+input port. The host can write to that buffer before each block. The host can
+also give one buffer to more than one plugin. Thus a value that a plugin
+writes into an input port is not safe, and no host reads that value back.
+
+In LV2 a port is an `lv2:InputPort` or an `lv2:OutputPort`. A port cannot be
+both. A control port that operates in two directions does not exist.
+
+mod-host obeys this rule. Neither of its two feedback messages looks at a port
+after `run()` returns:
+
+- `output_set` is controlled by `HINT_MONITORED` (`effects.c:229`,
+  `// outputs only`). The function `effects_monitor_output_parameter`
+  (`effects.c:6563`) finds the symbol with `FindEffectOutputPortBySymbol`,
+  which accepts an `lv2:OutputPort` only. A plugin cannot get this feedback
+  for an `lv2:InputPort`.
+- `param_set` comes from `SetPortValue` (`effects.c:2311`, sent at
+  `effects.c:2355-2370`). mod-host sends this message only when mod-host
+  itself sets the value: a `param_set` command from the browser, an HMI
+  actuator, or a MIDI-learned CC (`effects.c:2755-2763`). The CC path
+  calculates the value from the raw CC data and from the min/max limits of
+  mod-host. It does this before the plugin runs.
+
+Thus, if a plugin writes to an input port, mod-ui does not learn the new
+value. The browser continues to show the last value that mod-host sent. That
+value can be very different from the true state of the plugin.
+
+### The Correct Pattern: A Trigger Input and a Status Output
+
+To show a value that the plugin calculates, use two ports:
+
+1. An `lv2:InputPort` with the `pprops:trigger` property. The user or a MIDI
+   CC operates this port. The host sets the port back to its default value
+   after the block.
+2. An `lv2:OutputPort` that holds the state that the plugin calculates.
+   Add the symbol of this port to `modgui:monitoredOutputs` in the modgui
+   data. `utils_lilv.cpp:2502` reads that list. Then `host.py:2582` and
+   `host.py:4025` send `monitor_output <instance> <symbol>` to mod-host when
+   the plugin starts and when a pedalboard loads. This sets `HINT_MONITORED`,
+   and mod-host starts to send `output_set` for that port.
+
+The loopjefe LV2 plugin used one `state` port for both directions. That port
+gave no feedback. The plugin now has an `lv2:OutputPort` for `state` and
+`measure_number`, and four trigger input ports: `advance`, `reset`, `undo`,
+and `redo`.
+
+A `modgui:monitoredOutputs` value goes to the JavaScript file of the modgui as
+a `change` event (`modgui.js:522`, `setOutputPortValue`). A control widget
+cannot show an output port. Thus the JavaScript file of the plugin must write
+to the markup of the icon.
+
 ## The `data_finish` / `output_data_ready` Handshake
 
 mod-host batches one frame of output data, then signals the end:
@@ -18,7 +71,7 @@ mod-host                    mod-ui (host.py)              WebSocket clients
     |                            |                               |
     |-- output_set inst A ------>|                               |
     |-- output_set inst B ------>|-- output_set inst A --------->|
-    |-- param_set X :bypass 1 ->|-- output_set inst B --------->|
+    |-- param_set X :bypass 1 -->|-- output_set inst B --------->|
     |-- data_finish ------------>|-- param_set X :bypass 1.0 --->|
     |                            |                               |
     |                            |-- data_ready N -------------->|
@@ -40,7 +93,7 @@ all other feedback) stall if `output_data_ready` is never sent.
 
 ```python
 if msg == "data_finish":
-    if self.web_connected:          # any WebSocket client is open
+    if self.web_connected:  # any WebSocket client is open
         self.web_data_ready_ok = False
         self.web_data_ready_counter += 1
         self.msg_callback("data_ready %i" % counter)
@@ -48,10 +101,12 @@ if msg == "data_finish":
         # msg_callback sets web_data_ready_ok = True if it self-acknowledged,
         # so the timer is only armed when a real ack is still outstanding.
         if not self.web_data_ready_ok and self.last_data_finish_handle is None:
-            self.last_data_finish_handle = ioloop.call_later(0.15, self.send_output_data_ready_later)
+            self.last_data_finish_handle = ioloop.call_later(
+                0.15, self.send_output_data_ready_later
+            )
         return
     else:
-        yield gen.Task(self.send_output_data_ready, now)   # no client: use timer
+        yield gen.Task(self.send_output_data_ready, now)  # no client: use timer
 ```
 
 ### Client echo path (`session.py: ws_data_ready`)
@@ -70,9 +125,9 @@ def ws_data_ready(self, counter, ws):
 
 ```python
 def send_output_data_ready(self, now, callback):
-    self.web_data_ready_ok = True   # mark as done before sending
+    self.web_data_ready_ok = True  # mark as done before sending
     ...
-    self.send_notmodified("output_data_ready", callback)   # write socket → mod-host
+    self.send_notmodified("output_data_ready", callback)  # write socket → mod-host
 ```
 
 `web_data_ready_ok` is set here (rather than only in `ws_data_ready`) so that if the
