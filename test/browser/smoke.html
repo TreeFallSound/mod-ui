@@ -39,6 +39,22 @@ function check(name, ok, detail) {
   CHECKS.push((ok ? 'PASS  ' : 'FAIL  ') + name + (detail === undefined ? '' : '  [' + detail + ']'));
 }
 function note(){ NOTES.push([].join.call(arguments, ' ')); }
+
+// The accent is a design token (architecture rule 4.5), so the checks below
+// read it instead of naming a colour. A probe on the body also proves that the
+// token reaches outside the panel, which is what the drag helper needs.
+function accentRgb() {
+  var probe = document.createElement('div');
+  probe.style.cssText = 'position:absolute;left:-9999px;background:var(--sfz-accent)';
+  document.body.appendChild(probe);
+  var colour = getComputedStyle(probe).backgroundColor;
+  probe.parentNode.removeChild(probe);
+  return colour;
+}
+function accentRgba(alpha) {
+  var parts = accentRgb().match(/\d+/g) || [];
+  return 'rgba(' + parts.slice(0, 3).join(', ') + ', ' + alpha + ')';
+}
 window.onerror = function (m, s, l, c, e) { check('no script error', false, m + ' ' + ((e && e.stack) || '')); };
 window.addEventListener('unhandledrejection', function (e) {
   check('no rejected promise', false, (e.reason && (e.reason.stack || e.reason.message)) || e.reason);
@@ -137,8 +153,10 @@ setTimeout(function () {
         var hs2 = getComputedStyle(helper);
         var box = helper.getBoundingClientRect();
         check('the helper is on the body', helper.parentNode.tagName === 'BODY', helper.parentNode.tagName);
+        check('the accent token resolves on the body',
+              /^rgb\(/.test(accentRgb()), accentRgb());
         check('the helper has a ground you can see',
-              hs2.backgroundColor === 'rgb(242, 148, 70)', hs2.backgroundColor);
+              hs2.backgroundColor === accentRgb(), hs2.backgroundColor);
         check('the helper has a size you can see', box.width > 60 && box.height > 20,
               Math.round(box.width) + 'x' + Math.round(box.height));
         check('the helper names the sample', helper.textContent.indexOf('Kick_01.wav') >= 0,
@@ -156,7 +174,7 @@ setTimeout(function () {
       if (target) {
         var ts = getComputedStyle(target);
         check('a pad that can take the sample is drawn in the accent',
-              ts.borderTopColor === 'rgba(242, 148, 70, 0.55)', ts.borderTopColor);
+              ts.borderTopColor === accentRgba('0.55'), ts.borderTopColor);
       }
 
       fire(document, 'mouseup', pr.left + pr.width / 2, pr.top + pr.height / 2);
@@ -164,6 +182,224 @@ setTimeout(function () {
         check('the drop puts the sample on the pad',
               root.querySelectorAll('.sfz-pad--filled').length === 1);
         check('the helper goes away', !document.querySelector('.sfz-drag-helper'));
+        // The note stepper must keep one width. Its content goes from four to
+        // seven characters, so a box that sizes to its content moves the minus
+        // and the plus under the pointer while you step through the notes.
+        // These are the widest and the narrowest values, and the field that a
+        // click opens, which was a third width of its own.
+        var tokenbox = root.querySelector('.sfz-step .sfz-tokenbox');
+        check('the note stepper is there', !!tokenbox);
+        if (tokenbox) {
+          var widths = {};
+          var record = function (name) { widths[name] = tokenbox.offsetWidth; };
+          var setNote = function (value) {
+            tokenbox.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            var edit = tokenbox.querySelector('input.sfz-token-edit');
+            if (!edit) { return null; }
+            record('editing');
+            edit.value = String(value);
+            edit.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+            return edit;
+          };
+          record('36 C2');
+          check('a click opens the field that takes a number', !!setNote(127));
+          record('127 G9');
+          setNote(10);
+          record('10 A#-1');
+          setNote(0);
+          record('0 C-1');
+          var seen = Object.keys(widths).map(function (k) { return widths[k]; });
+          var same = seen.every(function (w) { return w === seen[0] && w > 0; });
+          check('the note stepper keeps one width', same,
+                Object.keys(widths).map(function (k) {
+                  return k + '=' + widths[k] + 'px';
+                }).join(' '));
+          setNote(36);
+        }
+
+        // The focus ring. main.less has `* { outline: 0 !important }`, so the
+        // panel has to put a ring back with a rule of its own. These checks say
+        // that it does, and that each control the mouse can reach the keyboard
+        // can reach as well: a div with an onclick and no tabindex takes no
+        // focus and thus can carry no ring.
+        var reach = [
+          ['the new bank button', '.sfz-add'],
+          ['the save button', '.sfz-save'],
+          ['a source button', '.sfz-seg button'],
+          ['the upload control', '.sfz-upload input'],
+          ['the filter box', '.sfz-search'],
+          ['a stepper button', '.sfz-step button'],
+          ['a stepper box', '.sfz-step input'],
+          ['the note stepper value', '.sfz-tokenbox'],
+          ['a bank row', '.sfz-bank'],
+          ['a sample row', '.sfz-sample'],
+          ['a sample play button', '.sfz-sample-play'],
+          ['a pad', '.sfz-pad']
+        ];
+        var unreachable = [];
+        var unringed = [];
+        reach.forEach(function (entry) {
+          var node = root.querySelector(entry[1]);
+          if (!node) { unreachable.push(entry[0] + ' (absent)'); return; }
+          node.focus();
+          if (document.activeElement !== node) { unreachable.push(entry[0]); return; }
+          // The ring is on :focus-visible. focus() from script counts as
+          // keyboard focus in Chrome, so the computed outline is the real one.
+          // The label wears the ring for the file input it hides.
+          var ringed = node.matches('.sfz-upload input') ? node.closest('.sfz-upload') : node;
+          var os = getComputedStyle(ringed);
+          if (parseFloat(os.outlineWidth) < 1 || os.outlineStyle === 'none') {
+            unringed.push(entry[0] + '=' + os.outlineStyle + ' ' + os.outlineWidth);
+          }
+        });
+        check('every control the mouse reaches the keyboard reaches',
+              unreachable.length === 0, unreachable.join(', ') || 'all ' + reach.length);
+        check('every control that has the focus shows a ring',
+              unringed.length === 0, unringed.join(', ') || 'all ' + reach.length);
+
+        // A tap must not leave a ring behind on the touch screen, which is what
+        // the :focus-visible guard is for. The behaviour cannot be driven from
+        // here: the browser decides :focus-visible from the last real input,
+        // and an event that a script sends is not one. So this check asks that
+        // the rule is present, and it is the rule going missing that the check
+        // is meant to catch.
+        var guard = false;
+        for (var r = 0; sheet && r < sheet.cssRules.length; r++) {
+          if ((sheet.cssRules[r].selectorText || '').indexOf(':focus:not(:focus-visible)') >= 0) {
+            guard = true;
+          }
+        }
+        check('a press leaves no ring behind', guard,
+              guard ? ':focus-visible guard present' : 'guard rule is gone');
+        root.querySelector('.sfz-pad').blur();
+
+        // The tab order is the order of the document, whatever the pad count.
+        // Nothing carries a positive tabindex, which would pull an element out
+        // of that order and put it in front of the whole page; every control is
+        // simply reached in the order it is drawn. This is checked at a pad
+        // count well above the default, because the pads and the controls they
+        // hold are what make the order long.
+        var padBox = root.querySelectorAll('.sfz-tools .sfz-step input')[0];
+        check('the pad count control is there', !!padBox);
+        if (padBox) {
+          padBox.value = '24';
+          padBox.dispatchEvent(new Event('change', { bubbles: true }));
+          check('the pad count follows the control',
+                root.querySelectorAll('.sfz-pad').length === 24,
+                root.querySelectorAll('.sfz-pad').length + ' pads');
+
+          var focusables = root.querySelectorAll(
+            'a[href], button, input, select, textarea, [tabindex]');
+          var positive = [], skipped = [];
+          for (var f = 0; f < focusables.length; f++) {
+            var node = focusables[f];
+            var attr = node.getAttribute('tabindex');
+            if (attr !== null && parseInt(attr, 10) > 0) { positive.push(node.className); }
+            if (attr !== null && parseInt(attr, 10) < 0) { skipped.push(node.className); }
+          }
+          check('nothing pulls itself out of the document order',
+                positive.length === 0, positive.join(', ') || 'no positive tabindex');
+          check('nothing takes itself out of the tab order',
+                skipped.length === 0, skipped.join(', ') || 'no negative tabindex');
+
+          // Every stop between one pad and the next belongs to that pad. This
+          // is what "the order of the document" means here: you reach a pad,
+          // then the controls it holds, then the pad after it. An empty pad
+          // holds none and is followed at once by the next, which is correct.
+          var pads = root.querySelectorAll('.sfz-pad');
+          // Only the stops inside the grid, so the last pad ends at the end of
+          // the grid and not at the end of the panel.
+          var grid = root.querySelector('.sfz-grid');
+          var list = [].filter.call(focusables, function (n) { return grid.contains(n); });
+          var strays = [], inner = {};
+          for (var i = 0; i < pads.length; i++) {
+            var from = list.indexOf(pads[i]);
+            var to = i + 1 < pads.length ? list.indexOf(pads[i + 1]) : list.length;
+            inner[i] = to - from - 1;
+            for (var j = from + 1; j < to; j++) {
+              if (!pads[i].contains(list[j])) { strays.push(i + ':' + list[j].className); }
+            }
+          }
+          check('every stop between two pads belongs to the pad before it',
+                strays.length === 0, strays.join(', ') || pads.length + ' pads walked');
+
+          // A pad that holds a sample adds its own controls to the order: the
+          // clear and play buttons, the gain and root steppers, the loop menu.
+          var filled = root.querySelector('.sfz-pad--filled');
+          var at = [].indexOf.call(pads, filled);
+          check('a pad that holds a sample puts its controls in the order',
+                filled && inner[at] >= 8, filled ? inner[at] + ' stops inside' : 'no filled pad');
+
+          padBox.value = '8';
+          padBox.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+
+        // The panel must not leak a jQuery UI widget when it draws again.
+        //
+        // jQuery UI keeps a droppable in $.ui.ddmanager and a draggable in the
+        // jQuery data cache, and takes either one out only through the cleanData
+        // hook of jQuery. A native removeChild never runs that hook, so a draw
+        // that removes the elements natively leaves the entries behind. They
+        // hold the element, so it is never collected, and jQuery UI walks the
+        // whole list of droppables on every move of a drag.
+        //
+        // The pads are drawn again on each change of the pad count, and the
+        // sample rows on each keystroke of the filter.
+        function droppableCount() {
+          var all = $.ui && $.ui.ddmanager && $.ui.ddmanager.droppables;
+          var n = 0;
+          for (var scope in all) { n += all[scope].length; }
+          return n;
+        }
+        function dataCount() { return Object.keys($.cache || {}).length; }
+
+        var search = root.querySelector('.sfz-search');
+        function redraw(times) {
+          for (var t = 0; t < times; t++) {
+            padBox.value = String(8 + (t % 2) * 4);
+            padBox.dispatchEvent(new Event('change', { bubbles: true }));
+            search.value = t % 2 ? 'a' : '';
+            search.dispatchEvent(new Event('input', { bubbles: true }));
+          }
+        }
+
+        redraw(2);
+        var dropBefore = droppableCount(), dataBefore = dataCount();
+        redraw(8);
+        var dropAfter = droppableCount(), dataAfter = dataCount();
+        check('a redraw leaks no droppable', dropAfter <= dropBefore,
+              dropBefore + ' -> ' + dropAfter);
+        check('a redraw leaks no jQuery data', dataAfter <= dataBefore,
+              dataBefore + ' -> ' + dataAfter);
+        padBox.value = '8';
+        padBox.dispatchEvent(new Event('change', { bubbles: true }));
+        search.value = '';
+        search.dispatchEvent(new Event('input', { bubbles: true }));
+
+        // No control may sit inside a role that flattens its children. The
+        // children of a button, an option, a tab and the rest below are
+        // presentational: a screen reader is free to read the element as one
+        // piece of text and drop what is inside it. A pad holds nine controls
+        // and a sample row holds a play button, so neither can wear one.
+        var FLATTENS = ['button', 'option', 'tab', 'menuitem',
+                        'menuitemcheckbox', 'menuitemradio',
+                        'checkbox', 'radio', 'switch', 'progressbar', 'slider'];
+        var swallowed = [];
+        var roled = root.querySelectorAll('[role]');
+        for (var k = 0; k < roled.length; k++) {
+          if (FLATTENS.indexOf(roled[k].getAttribute('role')) < 0) { continue; }
+          var held = roled[k].querySelectorAll(
+            'a[href], button, input, select, textarea, [tabindex]');
+          if (held.length > 0) {
+            swallowed.push(roled[k].getAttribute('role') + '.' +
+                           (roled[k].className || roled[k].tagName) +
+                           ' holds ' + held.length);
+          }
+        }
+        check('no control sits inside a role that drops its children',
+              swallowed.length === 0,
+              swallowed.join(', ') || roled.length + ' roles checked');
+
         var panel = root.querySelector('.sfz-panel');
         note('panel columns:', getComputedStyle(panel).gridTemplateColumns);
         note('colour scheme:', getComputedStyle(root).colorScheme);

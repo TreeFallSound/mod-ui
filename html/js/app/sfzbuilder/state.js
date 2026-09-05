@@ -8,6 +8,7 @@
  * Only `update` changes the state. Thus there is one place to write log messages.
  * @module
  */
+import { DEFAULT_PADS } from './model.js'
 
 /**
  * @typedef {object} SfzState
@@ -41,7 +42,7 @@ export function initialState() {
         slots: [],
         selectedSlot: -1,
         baseNote: 36,
-        padCount: 8,
+        padCount: DEFAULT_PADS,
         cols: 4,
         source: 'bank',
         search: '',

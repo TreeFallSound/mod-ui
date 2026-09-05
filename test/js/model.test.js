@@ -156,3 +156,22 @@ test('slotFromSample keeps the path for a file outside the bank', () => {
     assert.equal(model.slotFromSample(file, 'usb').source, '/media/usb/kick.wav')
     assert.equal(model.slotFromSample(file, 'bank').source, null)
 })
+
+test('pickInitialBank opens the bank of the last visit', () => {
+    assert.equal(model.pickInitialBank(['Drums', 'Keys'], 'Keys'), 'Keys')
+})
+
+test('pickInitialBank gives the first bank when the last one is gone', () => {
+    assert.equal(model.pickInitialBank(['Drums', 'Keys'], 'Deleted'), 'Drums')
+})
+
+test('pickInitialBank gives the first bank when nothing is remembered', () => {
+    assert.equal(model.pickInitialBank(['Drums', 'Keys'], null), 'Drums')
+    assert.equal(model.pickInitialBank(['Drums'], ''), 'Drums')
+    assert.equal(model.pickInitialBank(['Drums'], undefined), 'Drums')
+})
+
+test('pickInitialBank gives no bank when the device has none', () => {
+    assert.equal(model.pickInitialBank([], 'Keys'), '')
+    assert.equal(model.pickInitialBank([], null), '')
+})

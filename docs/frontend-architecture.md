@@ -1,8 +1,9 @@
 # Frontend Architecture
 
-Status: proposal.
+Status: in use. The SFZ builder is built this way and continuous integration
+holds the rules below.
 Branch: `feat/sfzbuilder`.
-Date: 2026-09-03.
+Date: 2026-09-03. Last change: 2026-09-04.
 
 ---
 
@@ -98,10 +99,24 @@ A change from JSDoc to TypeScript is mechanical. Do it when a bundler exists.
 The file `less/variables.less` has 841 lines.
 These are LESS variables. LESS variables are constants. They are gone after the compile.
 
-An island puts its design values in CSS custom properties on its root element.
+An island puts its design values in CSS custom properties.
 The LESS rules then read these properties.
 Custom properties operate at run time.
 Thus you can change the density for the small screen of the pi-stomp.
+
+Put the tokens on `:root`, not on the root element of the island, and start
+every name with the name of the island, for example `--sfz-`.
+A token on the island cannot be read outside it, and jQuery UI puts the helper
+of a drag on the `body`, which is outside it.
+A `var()` that does not resolve makes the whole property invalid, so the helper
+of the SFZ builder was black text on nothing.
+The prefix is what keeps a token at the root from meeting a legacy name.
+
+A test names a token. A test never names the value of a token.
+The smoke test of the SFZ builder held `rgb(242, 148, 70)` in two places, and
+both broke on the day the accent changed, although nothing was wrong.
+It now reads `--sfz-accent` through a probe element, which also proves the token
+reaches the `body`, which is the fault the check was written for.
 
 ### 4.6 Keep the model pure. Keep the view thin
 
@@ -109,8 +124,21 @@ Put the calculations in a model file.
 The model has no DOM code and no network code.
 Test the model with the `node:test` module.
 
-Do not write tests for the elements that the view makes.
+Do not write a unit test for the elements that the view makes.
 The cost of these tests is high. The value is low.
+
+Write one smoke test instead. It draws the panel in headless Chrome and asks the
+questions that only a browser can answer: the computed style, where the focus
+sits, the tab order, and a drag from a list onto a pad.
+`test/browser/` holds it and `make smoke` runs it.
+This test is cheap because there is one of it, and it has found faults that no
+unit test could reach: a stylesheet that did not load, a value that changed the
+width of its own control, and a control that the keyboard could not reach.
+
+A check in this test says what it wants, not what the code does today.
+When a check fails, read it again before you change the panel. Two checks of the
+tab order were themselves wrong: one assumed that pad 1 held controls, and one
+let the last pad reach past the grid to the end of the panel.
 
 ### 4.7 Make the state explicit
 
@@ -162,6 +190,94 @@ asks that each file under `html/js/app/` is in one of them. CI runs this test.
 
 The seam also writes a message on the panel when the island does not load, so
 the next fault of this class is visible in the browser.
+
+### 4.10 Give the panel back to the keyboard
+
+`main.less` holds this rule:
+
+    * {
+      outline: 0 !important
+    }
+
+It takes the focus ring that the browser draws off every element of the page,
+and thus off every island.
+A person on the keyboard then has no sign at all of where the focus sits.
+
+An island puts a ring back, inside itself only:
+
+    #sfzbuilder-library :focus {
+      outline: 2px solid var(--sfz-focus) !important;
+      outline-offset: -2px;
+    }
+    #sfzbuilder-library :focus:not(:focus-visible) {
+      outline: 0 !important;
+    }
+
+The `!important` is not decoration. Nothing except `!important` beats an
+`!important` declaration, and the rule above is the one that has to win.
+The offset is negative so that the ring is drawn inside the edge of the element:
+a ring outside the edge is cut by any list or grid that scrolls.
+The second rule takes the ring off a press, which matters on the touch screen of
+the device, where a tap would else leave a ring behind.
+A browser that does not know `:focus-visible` drops that rule and shows the ring
+for a press as well, which is the safe way for it to fail.
+
+Then three rules about the elements themselves.
+
+**An element that takes a click must take focus.**
+A `div` or a `li` with an `onclick` and no `tabindex` cannot be reached by the
+keyboard, and an element that cannot hold the focus cannot show a focus ring.
+Give it `tabindex="0"`, a role, and the two keys that activate a button.
+`clickable()` in `dom.js` does all three.
+Act on a key only when the element itself has the focus: a press on a button
+inside it sends a click of its own, and the keydown goes up to the element as
+well, so without the test it acts two times.
+
+**Do not put a role on a container that drops what is inside it.**
+The children of `button`, `option`, `tab`, `menuitem`, `checkbox`, `radio` and
+`switch` are presentational: a screen reader is free to read the element as one
+piece of text and drop every control inside it.
+A pad of the SFZ builder holds nine controls and wore `role="button"` for a
+while, which hid all nine.
+A pad is a `group`. A sample row keeps the `listitem` that a `li` in a `ul`
+already has. A bank row holds text only, so it is a `button`.
+An element that gains a control while it is open, such as the note stepper when
+a click turns it into a field, drops its role while the field is there.
+
+**Keep the order of the document.**
+Do not write a positive `tabindex`. It pulls the element in front of the whole
+page. Do not write a negative one either, which takes the control out of reach.
+`tabindex="0"` everywhere means the order is the order you drew the elements in.
+A long panel is thus a long tab order -- the SFZ builder has about ten stops for
+each pad it holds -- and that is accepted for now. A shorter path is a question
+of its own, in section 7.
+
+### 4.11 Take down with jQuery what you put up with jQuery
+
+An island writes its own elements with the browser API (rule 4.3), and
+`clear()` in `dom.js` removes them with `removeChild`.
+
+This is wrong for an element that carries a jQuery UI widget.
+jQuery UI 1.10 keeps a `draggable` and a `droppable` in `$.ui.ddmanager` and in
+the jQuery data cache, and it removes them only through the `cleanData` hook of
+jQuery, which a native `removeChild` never runs.
+The entries thus stay after the element is gone. They hold the element, so it is
+never collected, and jQuery UI walks the whole list of droppables on each move
+of a drag.
+
+Use the jQuery `empty()` or `remove()` on any subtree that holds a widget, or
+destroy each widget before you remove it.
+
+`clear()` in `dom.js` is the one place an island takes elements down, so it
+calls the jQuery `empty()` when jQuery is there and falls back to `removeChild`
+when it is not. An island that keeps its teardown in one function of its own
+gets this right everywhere at once.
+
+The smoke test counts the entries in `$.ui.ddmanager` and in the jQuery data
+cache across eight redraws and asks that neither one grows. Before the fix, the
+pads and the sample rows of the SFZ builder leaked eighty droppables and
+ninety-six data entries over those eight draws, and the panel draws again on
+every click of a pad and every keystroke of the filter.
 
 ## 5. Examples
 
@@ -234,20 +350,28 @@ Run it with `node --test test/js/`.
 
 ### 5.3 The tokens
 
+The tokens go on `:root`, so that they reach an element the island puts on the
+`body`, and every name carries the prefix of the island.
+
 ```css
-.sfz-root {
+:root {
     --sfz-bg: #111;
-    --sfz-accent: #f29446;
+    --sfz-accent: #883996;
+    --sfz-focus: #e8e8e8;
     --sfz-pad-min: 150px;
     --sfz-gap: 8px;
 }
 
-.sfz-pad-grid {
+#sfzbuilder-library .sfz-pad-grid {
     display: grid;
     gap: var(--sfz-gap);
     grid-template-columns: repeat(auto-fill, minmax(var(--sfz-pad-min), 1fr));
 }
 ```
+
+Each rule starts at the identifier of the panel. `main.css` holds rules for the
+bare elements -- `button`, `input`, `select`, `ul` -- and the identifier gives
+the rules of the island the greater weight.
 
 ### 5.4 The cache
 
@@ -276,6 +400,24 @@ We first accepted this risk. The risk became a fault on the device:
 `Cache-Control: no-cache` and an ETag. The browser asks each time and the server
 answers 304 when the file did not change.
 The 41 script elements of `index.html` do not change.
+
+### 5.5 The checks
+
+The `Makefile` holds every check. Continuous integration calls the targets and
+names no test file, so a new test runs without a change to either one.
+
+| Target | What it answers |
+|---|---|
+| `make compile` | Do the server files parse? |
+| `make test-py` | Does the model on the server behave? `unittest discover` finds `test/test_*.py`. |
+| `make test-js` | Does the model in the browser behave? `node --test` finds `test/js/**/*.test.js`, with no browser and no build step. |
+| `make typecheck` | Do the JSDoc types hold? `tsc --noEmit` over `html/js/app/`. |
+| `make smoke` | Does the panel draw, style, focus and drag in a real browser? |
+| `make test` | All of the above. Run this before you push. |
+
+`test/test_setup_data_files.py` belongs to `make test-py` and is the check that
+rule 4.9 asks for: it runs the globs of `setup.py` and asks that every file
+under `html/js/app/` is in one of them.
 
 ## 6. Tradeoffs
 
@@ -307,29 +449,58 @@ The server answers 304 and sends no body.
 On the local network this cost is small. It is smaller than the cost of a panel
 that is empty because the browser holds an old file.
 
+**One test needs a browser.**
+`make smoke` needs headless Chrome, so it is the one check that does not run
+from Python and node alone.
+It is worth the cost: it is the only place that can answer a question about the
+computed style, the focus or a drag, and those are the faults that an island
+makes, because an island draws everything itself.
+
 **The legacy problems continue.**
 This design does not repair `pedalboard.js` or `modgui.js`.
 It stops the growth of the problem. It does not remove the problem.
 
-## 7. Current PR -- sfz builder!
+## 7. The SFZ builder
 
-| Question | Decision |
-|---|---|
-| Directory | Use `html/js/app/<feature>/`. |
-| Number of commits | Two. Commit 1 gives the structure. Commit 2 gives the new design. |
-| Continuous integration | Add a workflow. |
-| The `?v=` parameter | Do not change it. `html/js/app/` gets `no-cache` instead. |
-| Tokens | Write tokens for the SFZ builder only. |
+The SFZ builder is the first island. What was decided, and what it became:
 
-Commit 1 must not change the appearance of the SFZ builder.
-Use `docs/sfzbuilder-inventory.md` to test commit 1.
-Commit 2 then changes the appearance only.
-Thus a visual difference in commit 2 is always intentional.
+| Question | Decision | Outcome |
+|---|---|---|
+| Directory | Use `html/js/app/<feature>/`. | `html/js/app/sfzbuilder/`: `mount.js`, `view.js`, `model.js`, `state.js`, `api.js`, `dom.js`, `legacy.js`, `sfzbuilder.css`. |
+| Number of commits | Two. Commit 1 gives the structure. Commit 2 gives the new design. | Held. `docs/sfzbuilder-inventory.md` was the test for commit 1. |
+| Continuous integration | Add a workflow. | `.github/workflows/ci.yml`, two jobs, calling the targets of section 5.5. |
+| The `?v=` parameter | Do not change it. `html/js/app/` gets `no-cache` instead. | `IslandStaticFileHandler` in `mod/webserver.py`. See section 5.4. |
+| Tokens | Write tokens for the SFZ builder only. | On `:root`, each name prefixed `--sfz-`. See rule 4.5. |
+
+Open question 1 of the earlier draft asked which steps the workflow runs in
+commit 1. It runs all of them: `compile`, `test-py`, `test-js`, `typecheck` and
+`smoke`.
+
+### What the first island taught
+
+Each of these is now a rule above, and each came from a fault in the panel.
+
+1. A file that the server does not send gives an empty panel and no other sign,
+   because the island draws everything. Hence the `setup.py` check (4.9), the
+   message on the seam, and the check that the stylesheet loaded.
+2. The browser held those files, and their 404, for a year (5.4).
+3. A token that does not reach the `body` makes a drag helper of black text on
+   nothing (4.5).
+4. `* { outline: 0 !important }` in `main.less` takes the focus ring off the
+   panel, and several controls could not hold focus in any case (4.10).
+5. A value that changes width moves the control under the pointer. A stepper
+   holds one width whatever it shows.
+6. A test that names a colour breaks when the design changes and says nothing
+   when the code breaks (4.5).
+7. An island draws its own elements, so it takes them down itself, and a native
+   `removeChild` leaks every jQuery UI widget on them (4.11).
 
 ### Open questions
 
-1. Which steps does the workflow run in commit 1?
-   The JavaScript tests do not exist before commit 1.
-   The workflow can start with `py_compile` and `pytest`.
-2. When do we add a bundler and TypeScript?
-3. Which shared directory do two islands use? Do not make this directory before two islands need it.
+1. When do we add a bundler and TypeScript?
+2. Which shared directory do two islands use? Do not make this directory before
+   two islands need it.
+3. How does a long panel keep a short path for the keyboard? The SFZ builder
+   puts every pad and every control inside it in the tab order, which is correct
+   and slow at 128 pads. A roving `tabindex` with the arrow keys is the usual
+   answer, and it is not built (4.10).

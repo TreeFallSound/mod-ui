@@ -17,6 +17,9 @@ import { toggleClass } from './dom.js'
 /** Where the browser keeps the column count between visits. */
 const COLS_KEY = 'sfzbuilder.cols'
 
+/** Where the browser keeps the bank that you worked on last. */
+const BANK_KEY = 'sfzbuilder.bank'
+
 /**
  * Adds the stylesheet of the island to the page, one time.
  *
@@ -48,22 +51,31 @@ function addStylesheet() {
 }
 
 /**
- * Reads the column count that the last visit used.
- * A browser can refuse storage. The panel then uses the default.
- * @returns {number}
+ * Reads one value that the last visit wrote.
+ *
+ * A browser can refuse storage: a private window, or a setting that blocks site
+ * data. Each call is thus in a try. The panel works without storage; it only
+ * forgets what the last visit did.
+ *
+ * @param {string} key
+ * @returns {string|null} Null when there is no value, or when storage fails.
  */
-function readCols() {
+function readSetting(key) {
     try {
-        return model.clampCols(window.localStorage.getItem(COLS_KEY))
+        return window.localStorage.getItem(key)
     } catch (e) {
-        return model.DEFAULT_COLS
+        return null
     }
 }
 
-/** @param {number} cols */
-function writeCols(cols) {
+/**
+ * Keeps one value for the next visit.
+ * @param {string} key
+ * @param {string} value
+ */
+function writeSetting(key, value) {
     try {
-        window.localStorage.setItem(COLS_KEY, String(cols))
+        window.localStorage.setItem(key, value)
     } catch (e) {
         /* The panel works without storage. */
     }
@@ -248,7 +260,7 @@ export function mount(root) {
     /** @param {number} cols */
     function setCols(cols) {
         store.update({ cols: cols })
-        writeCols(cols)
+        writeSetting(COLS_KEY, String(cols))
         el.grid.style.setProperty('--sfz-cols', String(cols))
     }
 
@@ -333,6 +345,17 @@ export function mount(root) {
             }
             const saved = resp.slots || []
             if (saved.length === 0) {
+                // A bank that was never saved has no layout. The panel would
+                // else keep the pads of the bank that was open before, and the
+                // pad count and base note with them.
+                const padCount = model.DEFAULT_PADS
+                store.update({
+                    slots: model.resizePads([], padCount),
+                    padCount: padCount,
+                    baseNote: model.DEFAULT_BASE_NOTE,
+                })
+                el.padStepper.set(padCount)
+                el.baseStepper.set(model.DEFAULT_BASE_NOTE)
                 drawSlots()
                 return
             }
@@ -352,6 +375,8 @@ export function mount(root) {
         }
         stopPreview()
         store.update({ currentBank: name, selectedSlot: -1, bankFiles: [] })
+        // The next visit opens this bank again. See model.pickInitialBank.
+        writeSetting(BANK_KEY, name)
         drawBanks()
         drawBankView()
         setStatus('')
@@ -551,6 +576,17 @@ export function mount(root) {
     function refreshAll() {
         addGuards()
         loadBanks().then(() => {
+            const state = store.get()
+            if (!state.currentBank) {
+                // The panel opens on the bank of the last visit. loadBanks
+                // clears the current bank when that bank is gone, so this runs
+                // on the first visit and after a bank goes away.
+                const pick = model.pickInitialBank(state.banks, readSetting(BANK_KEY))
+                if (pick) {
+                    selectBank(pick)
+                    return
+                }
+            }
             refreshSamples()
             drawSlots()
         })
@@ -563,7 +599,7 @@ export function mount(root) {
         removeGuards()
     }
 
-    setCols(readCols())
+    setCols(model.clampCols(readSetting(COLS_KEY)))
     el.colStepper.set(store.get().cols)
     setPadCount(store.get().padCount)
     drawBankView()
