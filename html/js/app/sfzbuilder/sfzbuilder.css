@@ -24,7 +24,7 @@
  * was then black text on nothing. Each name starts with --sfz-, so a token at
  * the root cannot collide with the legacy styles. */
 :root {
-  --sfz-accent: #F29446;
+  --sfz-accent: #883996;
   --sfz-bg: #0a0a0a;
   --sfz-panel: #0f0f0f;
   --sfz-rail: #141414;
@@ -39,6 +39,12 @@
   --sfz-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
   --sfz-sans: system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
   --sfz-snap: 80ms;
+  /* The least width of the note stepper value. See .sfz-tokenbox. */
+  --sfz-token-w: 88px;
+  /* The focus ring. A light neutral, not the accent: the ring has to be legible
+     on the accent itself, which fills a bank row and a pad while they hold the
+     selection. */
+  --sfz-focus: #e8e8e8;
 }
 
 #sfzbuilder-library {
@@ -94,6 +100,31 @@
   text-shadow: none;
 }
 
+/* The focus ring.
+ *
+ * main.less holds `* { outline: 0 !important }`, which takes the ring that the
+ * browser draws off every element of the page, and thus off this panel. A
+ * person on the keyboard then has no sign at all of where the focus sits. The
+ * rule below puts a ring back, inside this panel only. It carries !important
+ * because nothing except !important beats an !important declaration.
+ *
+ * The offset is negative, so the ring is drawn inside the edge of the element.
+ * A ring outside the edge is cut by the list that holds a bank row or a sample
+ * row, and by the grid that holds a pad.
+ *
+ * :focus-visible draws the ring for the keyboard and not for a press, which
+ * matters on the touch screen of the device: a tap on a pad would else leave a
+ * ring behind on it. The second rule is what takes the ring off a press. A
+ * browser that does not know :focus-visible drops that rule and then shows the
+ * ring for a press as well, which is the safe way for it to fail. */
+#sfzbuilder-library :focus {
+  outline: 2px solid var(--sfz-focus) !important;
+  outline-offset: -2px;
+}
+#sfzbuilder-library :focus:not(:focus-visible) {
+  outline: 0 !important;
+}
+
 /* The panel is a wrapper, not the root. window.js hides and shows the root
    with jQuery, which writes an inline display value. A grid on the root would
    fight that. */
@@ -133,7 +164,7 @@
 }
 #sfzbuilder-library .sfz-seg button:last-child { border-right: 0; }
 #sfzbuilder-library .sfz-seg button:hover { color: var(--sfz-text); background: var(--sfz-line-soft); }
-#sfzbuilder-library .sfz-seg button[aria-pressed="true"] { background: var(--sfz-accent); color: #000; }
+#sfzbuilder-library .sfz-seg button[aria-pressed="true"] { background: var(--sfz-accent); color: #fff; }
 
 #sfzbuilder-library .sfz-btn {
   appearance: none;
@@ -151,7 +182,7 @@
   text-align: center;
   transition: background var(--sfz-snap) linear, color var(--sfz-snap) linear;
 }
-#sfzbuilder-library .sfz-btn:hover { background: var(--sfz-accent); color: #000; }
+#sfzbuilder-library .sfz-btn:hover { background: var(--sfz-accent); color: #fff; }
 #sfzbuilder-library .sfz-btn:disabled,
 #sfzbuilder-library .sfz-btn.sfz-btn--off {
   border-color: var(--sfz-line);
@@ -181,7 +212,7 @@
   padding: 0;
   transition: background var(--sfz-snap) linear, color var(--sfz-snap) linear;
 }
-#sfzbuilder-library .sfz-step button:hover { background: var(--sfz-accent); color: #000; }
+#sfzbuilder-library .sfz-step button:hover { background: var(--sfz-accent); color: #fff; }
 #sfzbuilder-library .sfz-step button:disabled { color: #2e2e2e; cursor: default; background: transparent; }
 #sfzbuilder-library .sfz-step input {
   width: 46px;
@@ -195,7 +226,7 @@
   font-size: 13px;
   padding: 0;
 }
-#sfzbuilder-library .sfz-step input:focus { outline: none; color: var(--sfz-accent); }
+#sfzbuilder-library .sfz-step input:focus { color: var(--sfz-accent); }
 
 /* The small stepper of a pad. minmax(0,1fr) and width:0 keep it inside the pad
    at six columns. A bare 1fr track has an automatic minimum of the content
@@ -210,14 +241,50 @@
 #sfzbuilder-library .sfz-note .sfz-note-num { color: var(--sfz-dim); font-size: 15px; }
 #sfzbuilder-library .sfz-note .sfz-note-name { color: var(--sfz-accent); font-size: 15px; font-weight: 700; }
 #sfzbuilder-library .sfz-note--out .sfz-note-name { color: var(--sfz-err); }
-#sfzbuilder-library .sfz-step .sfz-note { padding: 0 12px; height: 24px; align-items: center; cursor: text; }
+#sfzbuilder-library .sfz-step .sfz-note {
+  height: 24px;
+  align-items: center;
+  cursor: text;
+  justify-content: center;
+}
+
+/* The value of the note stepper keeps one width whatever it shows.
+ *
+ * The number goes from "0" to "127" and the name from "C2" to "A#-1", so the
+ * content is between four and seven characters wide. A box that sizes to its
+ * content thus moves the minus and the plus under the pointer while you step
+ * through the notes, and a click, which turns the box into a field that takes a
+ * number, changed the width a third time.
+ *
+ * Each part gets a column of its own, in ch, so the columns follow the font of
+ * the device instead of a measure taken here. The number is right aligned and
+ * the name left aligned, so neither one slides when the number gains a digit.
+ * --sfz-token-w is then a floor for the box, not the width itself: the content
+ * is already constant, and a min-width cannot clip a wide font the way a fixed
+ * width can. */
+#sfzbuilder-library .sfz-step .sfz-note-num,
+#sfzbuilder-library .sfz-step .sfz-note-name { flex: 0 0 auto; display: inline-block; }
+#sfzbuilder-library .sfz-step .sfz-note-num { width: 3ch; text-align: right; }
+#sfzbuilder-library .sfz-step .sfz-note-name { width: 4ch; text-align: left; }
+
 #sfzbuilder-library .sfz-tokenbox {
   display: inline-flex;
+  justify-content: center;
+  min-width: var(--sfz-token-w);
   border-left: 1px solid var(--sfz-line);
   border-right: 1px solid var(--sfz-line);
   background: #000;
 }
-#sfzbuilder-library .sfz-step input.sfz-token-edit { width: 84px; border: 0; }
+/* The field that a click opens fills the box, so the box keeps its width. */
+/* flex-basis 0 and width 0, as the small stepper of a pad does: a basis of
+   auto falls back to the intrinsic width of an input, which is about twenty
+   characters, and the box grew when you clicked it. */
+#sfzbuilder-library .sfz-step input.sfz-token-edit {
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
+  border: 0;
+}
 
 /* ---------- the bank rail ---------- */
 
@@ -263,8 +330,8 @@
 #sfzbuilder-library .sfz-bank:hover { background: #000; color: var(--sfz-text); }
 #sfzbuilder-library .sfz-bank-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #sfzbuilder-library .sfz-bank-count { font-size: 12px; color: var(--sfz-dimmer); flex: 0 0 auto; }
-#sfzbuilder-library .sfz-bank--on { background: var(--sfz-accent); color: #000; border-left-color: #000; font-weight: 700; }
-#sfzbuilder-library .sfz-bank--on .sfz-bank-count { color: #000; opacity: .65; }
+#sfzbuilder-library .sfz-bank--on { background: var(--sfz-accent); color: #fff; border-left-color: #000; font-weight: 700; }
+#sfzbuilder-library .sfz-bank--on .sfz-bank-count { color: #fff; opacity: .75; }
 #sfzbuilder-library .sfz-new-bank {
   width: 100%;
   background: #000;
@@ -273,7 +340,6 @@
   padding: 9px 14px;
   font-size: 14px;
 }
-#sfzbuilder-library .sfz-new-bank:focus { outline: none; }
 
 /* ---------- the centre ---------- */
 
@@ -413,7 +479,7 @@
   color: var(--sfz-text);
   transition: border-color var(--sfz-snap) linear;
 }
-#sfzbuilder-library .sfz-select:focus { outline: none; border-color: var(--sfz-accent); }
+#sfzbuilder-library .sfz-select:focus { border-color: var(--sfz-accent); }
 
 #sfzbuilder-library .sfz-pad--empty { border-style: solid; border-color: var(--sfz-line-free); background: transparent; }
 #sfzbuilder-library .sfz-pad--filled { border-color: var(--sfz-line); }
@@ -422,23 +488,23 @@
 #sfzbuilder-library .sfz-pad--on {
   border-color: var(--sfz-accent);
   box-shadow: inset 0 0 0 1px var(--sfz-accent);
-  background: rgba(242, 148, 70, .07);
+  background: rgba(136, 57, 150, .07);
 }
 /* While a drag runs, each pad says that it can take the sample. Without this
    you cannot see where to put the sample until you are already over a pad.
    jQuery UI adds --target to every pad and --drop to the one under the
    pointer. */
 #sfzbuilder-library .sfz-pad--target {
-  border-color: rgba(242, 148, 70, .55);
+  border-color: rgba(136, 57, 150, .55);
   border-style: dashed;
-  background: rgba(242, 148, 70, .04);
+  background: rgba(136, 57, 150, .04);
 }
-#sfzbuilder-library .sfz-pad--target .sfz-pad-free { color: rgba(242, 148, 70, .75); }
+#sfzbuilder-library .sfz-pad--target .sfz-pad-free { color: rgba(136, 57, 150, .75); }
 #sfzbuilder-library .sfz-pad--drop {
   border-color: var(--sfz-accent);
   border-style: solid;
   box-shadow: inset 0 0 0 1px var(--sfz-accent);
-  background: rgba(242, 148, 70, .14);
+  background: rgba(136, 57, 150, .14);
 }
 #sfzbuilder-library .sfz-pad--drop .sfz-pad-free { color: var(--sfz-accent); font-weight: 700; }
 /* The row that you took the sample from. */
@@ -506,9 +572,28 @@
   font-size: 13px;
   width: 100%;
 }
-#sfzbuilder-library .sfz-search:focus { outline: none; border-color: var(--sfz-accent); }
+#sfzbuilder-library .sfz-search:focus { border-color: var(--sfz-accent); }
 #sfzbuilder-library .sfz-upload { display: block; margin: 0; padding: 7px 10px; font-size: 10px; }
-#sfzbuilder-library .sfz-upload input { display: none; }
+/* display:none takes the file input out of the tab order, and the label around
+   it is not focusable either, so Upload could not be reached by the keyboard at
+   all. The input is instead put where it cannot be seen but keeps its focus,
+   and the label wears the ring for it. */
+#sfzbuilder-library .sfz-upload { position: relative; }
+#sfzbuilder-library .sfz-upload input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  clip-path: inset(50%);
+  overflow: hidden;
+  white-space: nowrap;
+}
+#sfzbuilder-library .sfz-upload:focus-within {
+  outline: 2px solid var(--sfz-focus) !important;
+  outline-offset: -2px;
+}
 #sfzbuilder-library .sfz-sample-list {
   list-style: none;
   margin: 0;
@@ -565,8 +650,8 @@
   align-items: center;
   gap: 8px;
   max-width: 280px;
-  background: var(--sfz-accent, #F29446);
-  color: #000;
+  background: var(--sfz-accent, #883996);
+  color: #fff;
   border: 1px solid #000;
   box-shadow: 0 4px 14px rgba(0, 0, 0, .55);
   font-family: var(--sfz-mono, Menlo, monospace);

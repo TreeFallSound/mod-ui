@@ -41,6 +41,7 @@ export const AUDIO_EXTENSIONS = [
 
 export const DEFAULT_BASE_NOTE = 36
 export const MAX_NOTE = 127
+export const DEFAULT_PADS = 8
 export const MIN_PADS = 1
 export const MAX_PADS = 128
 export const MIN_COLS = 2
@@ -222,6 +223,25 @@ export function slotFromSample(entry, source) {
         pitch: null,
         loop: 'one_shot',
     }
+}
+
+/**
+ * Chooses the bank that the panel opens with.
+ *
+ * The panel remembers the bank that you worked on and opens it again, because
+ * you frequently come back to the same bank. A bank that is gone, or a device
+ * that has no memory of a bank, gives the first bank instead. An empty device
+ * gives no bank and the panel then shows its empty state.
+ *
+ * @param {string[]} banks The banks that the server gives.
+ * @param {string|null|undefined} remembered The bank of the last visit.
+ * @returns {string} A name from `banks`, or an empty string.
+ */
+export function pickInitialBank(banks, remembered) {
+    if (remembered && banks.indexOf(remembered) >= 0) {
+        return remembered
+    }
+    return banks.length > 0 ? banks[0] : ''
 }
 
 /**

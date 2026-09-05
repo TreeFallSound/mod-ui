@@ -16,8 +16,11 @@
  */
 
 import { jq } from './legacy.js'
-import { h, clear, toggleClass, show } from './dom.js'
+import { h, clear, toggleClass, show, clickable } from './dom.js'
 import * as model from './model.js'
+
+/** What the title says when no bank is open. */
+const NO_BANK_TITLE = 'No bank'
 
 /**
  * Makes a stepper: a minus button, a value and a plus button.
@@ -55,7 +58,10 @@ export function makeStepper(spec) {
     const plus = h('button', { type: 'button', text: '+', title: 'More' })
 
     if (spec.token) {
-        box = h('span.sfz-tokenbox')
+        // The box is a span, so it needs the tab order and the keys of a button
+        // given to it. This happens one time here and not in drawToken, which
+        // runs again after every change and would else add a listener each time.
+        box = clickable(h('span.sfz-tokenbox'), openEditor)
     } else {
         input = /** @type {HTMLInputElement} */ (h('input', {
             type: 'text',
@@ -105,35 +111,44 @@ export function makeStepper(spec) {
     // number, so you can go to a far note without many clicks.
     function drawToken() {
         clear(box)
+        // A button again: the box holds text only in this condition.
+        box.setAttribute('role', 'button')
         box.appendChild(noteTokenNode(value === null ? spec.min : value))
-        box.onclick = () => {
-            const edit = /** @type {HTMLInputElement} */ (h('input.sfz-token-edit', {
-                type: 'text',
-                inputmode: 'numeric',
-                value: String(value),
-            }))
-            let done = false
-            function commit() {
-                if (done) {
-                    return
-                }
-                done = true
-                set(parseInt(edit.value, 10))
+    }
+
+    /** Turns the token box into the field that takes a number. */
+    function openEditor() {
+        const edit = /** @type {HTMLInputElement} */ (h('input.sfz-token-edit', {
+            type: 'text',
+            inputmode: 'numeric',
+            value: String(value),
+        }))
+        let done = false
+        function commit() {
+            if (done) {
+                return
             }
-            clear(box)
-            box.appendChild(edit)
-            edit.focus()
-            edit.select()
-            edit.addEventListener('blur', commit)
-            edit.addEventListener('keydown', (/** @type {any} */ e) => {
-                if (e.key === 'Enter') {
-                    commit()
-                } else if (e.key === 'Escape') {
-                    done = true
-                    drawToken()
-                }
-            })
+            done = true
+            set(parseInt(edit.value, 10))
         }
+        clear(box)
+        // The box now holds a field that takes a number. The children of a
+        // button are presentational, so the role goes away while the field is
+        // open, or a screen reader could say nothing of what you type.
+        box.removeAttribute('role')
+        box.appendChild(edit)
+        edit.focus()
+        edit.select()
+        edit.addEventListener('blur', commit)
+        edit.addEventListener('keydown', (/** @type {any} */ e) => {
+            if (e.key === 'Enter') {
+                commit()
+            } else if (e.key === 'Escape') {
+                done = true
+                drawToken()
+                box.focus()
+            }
+        })
     }
 
     minus.addEventListener('click', () => set(value === null ? base() : value - 1))
@@ -196,12 +211,14 @@ export function createLayout(root, handlers) {
         bankList,
     ])
 
-    const title = h('h2.sfz-title', { text: 'Untitled' })
+    // "Untitled" said that the bank had no name. A bank always has a name; what
+    // the panel means here is that no bank is open, which is a different idea.
+    const title = h('h2.sfz-title', { text: NO_BANK_TITLE })
     const saveButton = h('button.sfz-btn.sfz-save', { type: 'button', text: 'Save', title: 'Write the SFZ file of this bank' , onclick: handlers.onSave })
     const status = h('span.sfz-status')
 
     const padStepper = makeStepper({
-        min: model.MIN_PADS, max: model.MAX_PADS, value: 8,
+        min: model.MIN_PADS, max: model.MAX_PADS, value: model.DEFAULT_PADS,
         title: 'How many pads this bank has',
         // A stepper that is not nullable never gives null. The clamp says so
         // to the type checker and costs nothing.
@@ -325,7 +342,7 @@ export function renderStatus(el, message, isError) {
  */
 export function renderBankView(el, state) {
     const bank = state.currentBank
-    el.title.textContent = bank || 'Untitled'
+    el.title.textContent = bank || NO_BANK_TITLE
     show(el.emptyState, !bank)
     show(el.grid, !!bank)
     show(el.tools, !!bank)
@@ -349,13 +366,13 @@ export function renderBankView(el, state) {
 export function renderBanks(el, state, onSelect) {
     clear(el.bankList)
     for (const name of state.banks) {
-        const row = h('div.sfz-bank' + (name === state.currentBank ? '.sfz-bank--on' : ''), {
+        const row = clickable(h('div.sfz-bank' + (name === state.currentBank ? '.sfz-bank--on' : ''), {
             title: name,
-            onclick: () => onSelect(name),
+            'aria-pressed': name === state.currentBank ? 'true' : 'false',
         }, [
             h('span.sfz-bank-name', { text: name }),
             h('span.sfz-bank-count', { text: countLabel(state.bankCounts[name]) }),
-        ])
+        ]), () => onSelect(name))
         el.bankList.appendChild(row)
     }
 }
@@ -434,16 +451,20 @@ export function renderSamples(el, state, handlers) {
                 handlers.onPlay(play, f.fullname)
             },
         })
-        const row = h('li.sfz-sample', {
+        // A click fills the pad that is selected. This is the path for a touch
+        // screen, where a drag is awkward, and for the keyboard.
+        //
+        // The row holds a play button, so it keeps the listitem role that a li
+        // inside a ul already has. A button role would let a screen reader drop
+        // that play button.
+        const row = clickable(h('li.sfz-sample', {
             title: f.fullname,
-            // A click fills the pad that is selected. This is the path for a
-            // touch screen, where a drag is awkward.
-            onclick: () => handlers.onPick(f),
+            'aria-label': f.basename + ', put on the pad that is selected',
         }, [
             play,
             h('span.sfz-sample-name', { text: f.basename }),
             h('span.sfz-sample-size', { text: model.formatSize(f.size) }),
-        ])
+        ]), () => handlers.onPick(f), null)
 
         const $row = $(row)
         $row.data('sfz-file', f)
@@ -528,11 +549,21 @@ export function renderSlots(el, state, handlers) {
             head.appendChild(h('div.sfz-pad-file', { text: slot.sample, title: slot.sample }))
         }
 
-        const pad = h('div.sfz-pad'
+        // A pad is a group, not a button. It holds the clear and play buttons,
+        // two steppers and the loop menu, and the children of a button are
+        // presentational: a screen reader may drop every one of them. A group
+        // keeps its children. aria-pressed belongs to a button, so the
+        // selection is said in the label instead.
+        const pad = clickable(h('div.sfz-pad'
             + (slot ? '.sfz-pad--filled' : '.sfz-pad--empty')
             + (idx === state.selectedSlot ? '.sfz-pad--on' : ''),
-            { onclick: () => handlers.onSelect(idx) },
-            [head, slot ? padProps(slot) : h('div.sfz-pad-free', { text: '— FREE —' })])
+            {
+                'aria-label': 'Pad ' + (idx + 1) + ', note ' + model.noteToken(note).name
+                    + (slot ? ', ' + slot.sample : ', free')
+                    + (idx === state.selectedSlot ? ', selected' : ''),
+            },
+            [head, slot ? padProps(slot) : h('div.sfz-pad-free', { text: '— FREE —' })]),
+            () => handlers.onSelect(idx), 'group')
 
         // Each pad takes its own drop, so a sample lands where you put it.
         $(pad).droppable({
