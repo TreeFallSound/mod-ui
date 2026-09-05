@@ -25,8 +25,8 @@ const NO_BANK_TITLE = 'No bank'
 /**
  * Makes a stepper: a minus button, a value and a plus button.
  *
- * The panel has no bare number box. A number box is hard to hit on the small
- * screen of the device and shows no limit.
+ * The panel has no bare number box. A number box is hard to hit with a finger,
+ * on a tablet or a phone, and shows no limit.
  *
  * A stepper can hold no value when `nullable` is true. The gain and the root
  * note of a pad have no value by default, which the SFZ file needs: a pad with
@@ -200,6 +200,8 @@ export function noteTokenNode(note) {
  * @param {(cols: number) => void} handlers.onCols
  * @param {(note: number) => void} handlers.onBaseNote
  * @param {() => void} handlers.onSave
+ * @param {() => void} handlers.onRenameBank
+ * @param {() => void} handlers.onDeleteBank
  */
 export function createLayout(root, handlers) {
     clear(root)
@@ -215,6 +217,14 @@ export function createLayout(root, handlers) {
     // the panel means here is that no bank is open, which is a different idea.
     const title = h('h2.sfz-title', { text: NO_BANK_TITLE })
     const saveButton = h('button.sfz-btn.sfz-save', { type: 'button', text: 'Save', title: 'Write the SFZ file of this bank' , onclick: handlers.onSave })
+    const renameButton = h('button.sfz-btn.sfz-btn--quiet', {
+        type: 'button', text: 'Rename', title: 'Change the name of this bank',
+        onclick: handlers.onRenameBank,
+    })
+    const deleteButton = h('button.sfz-btn.sfz-btn--quiet.sfz-btn--danger', {
+        type: 'button', text: 'Delete', title: 'Remove this bank and every file in it',
+        onclick: handlers.onDeleteBank,
+    })
     const status = h('span.sfz-status')
 
     const padStepper = makeStepper({
@@ -239,7 +249,6 @@ export function createLayout(root, handlers) {
         h('span.sfz-field', {}, [h('span.sfz-lbl', { text: 'Pads' }), padStepper.node]),
         h('span.sfz-field', {}, [h('span.sfz-lbl', { text: 'Cols' }), colStepper.node]),
         h('span.sfz-field', {}, [h('span.sfz-lbl', { text: 'Base' }), baseStepper.node]),
-        status,
     ])
 
     const grid = h('div.sfz-grid')
@@ -253,8 +262,15 @@ export function createLayout(root, handlers) {
     ])
 
     const center = h('div.sfz-center', {}, [
+        // The status sits on the title line, not in the tool row. The tool row
+        // is hidden while no bank is open, and that is exactly when the panel
+        // has the most to say ("Select a bank first"); the head is never
+        // hidden. In the tool row it also wrapped onto a line of its own as
+        // soon as the centre column went under about 490px, which read as an
+        // empty line under the title.
         h('div.sfz-head', {}, [
-            h('div.sfz-head-top', {}, [title, h('div.sfz-head-right', {}, [saveButton])]),
+            h('div.sfz-head-top', {}, [title, status,
+                h('div.sfz-head-right', {}, [renameButton, deleteButton, saveButton])]),
             tools,
         ]),
         grid,
@@ -314,7 +330,7 @@ export function createLayout(root, handlers) {
 
     return {
         root, header, panel, rail, bankList, addBank,
-        title, saveButton, tools, status,
+        title, saveButton, renameButton, deleteButton, tools, status,
         grid, emptyState,
         sourceButtons, uploadInput, search, sampleList,
         overlay, overlaySub,
@@ -346,8 +362,10 @@ export function renderBankView(el, state) {
     show(el.emptyState, !bank)
     show(el.grid, !!bank)
     show(el.tools, !!bank)
-    // @ts-ignore - a button has `disabled`.
-    el.saveButton.disabled = !bank
+    for (const button of [el.saveButton, el.renameButton, el.deleteButton]) {
+        // @ts-ignore - a button has `disabled`.
+        button.disabled = !bank
+    }
     el.overlaySub.textContent = bank
         ? 'WAV · FLAC · AIFF · OGG · MP3 — added to ' + bank
         : 'Select a bank first'
@@ -383,6 +401,62 @@ export function renderBanks(el, state, onSelect) {
  */
 function countLabel(count) {
     return typeof count === 'number' ? String(count) : ''
+}
+
+/**
+ * Turns the title into a field that takes a new name for the bank.
+ *
+ * The rename happens where the name is, the same way a new bank is named in
+ * the place the row will take. The panel opens no dialog of its own: the one
+ * dialog it uses is the browser confirm before a delete, which is what the
+ * legacy code does for a change that cannot be undone.
+ * @param {Elements} el
+ * @param {(name: string) => void} onCommit
+ */
+export function promptRenameBank(el, onCommit) {
+    const current = el.title.textContent || ''
+    if (el.title.parentNode === null || el.title.hidden) {
+        return
+    }
+    const input = /** @type {HTMLInputElement} */ (h('input.sfz-title-edit', {
+        type: 'text', value: current, 'aria-label': 'The name of this bank',
+    }))
+    el.title.hidden = true
+    el.title.parentNode.insertBefore(input, el.title)
+    input.focus()
+    input.select()
+
+    let done = false
+    /** @param {boolean} back Whether the focus goes to the Rename button. */
+    function close(back) {
+        done = true
+        el.title.hidden = false
+        if (input.parentNode) {
+            input.parentNode.removeChild(input)
+        }
+        if (back) {
+            el.renameButton.focus()
+        }
+    }
+    input.addEventListener('keydown', (/** @type {any} */ e) => {
+        if (e.key === 'Enter') {
+            const name = (input.value || '').trim()
+            close(true)
+            if (name && name !== current) {
+                onCommit(name)
+            }
+        } else if (e.key === 'Escape') {
+            // A stray Escape must not reach the window manager and close the
+            // panel with the field still open.
+            e.stopPropagation()
+            close(true)
+        }
+    })
+    input.addEventListener('blur', () => {
+        if (!done) {
+            close(false)
+        }
+    })
 }
 
 /**

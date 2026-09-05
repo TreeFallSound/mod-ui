@@ -51,10 +51,10 @@ from mod import (
 )
 from mod.bank import list_banks, save_banks, remove_pedalboard_from_banks
 from mod.sfzbuilder import (
-    AUDIO_EXTENSIONS, SFZ_NAME, SIDECAR_NAME,
+    AUDIO_EXTENSIONS, SIDECAR_NAME,
     sanitize_filename, unique_filename, list_banks as sfz_list_banks,
     list_bank_samples, list_device_samples, list_usb_samples, create_bank, build_bank,
-    load_bank,
+    load_bank, rename_bank, delete_bank,
 )
 from mod.session import SESSION
 from modtools.utils import (
@@ -2375,6 +2375,27 @@ class SfzBuilderBank(JsonRequestHandler):
             return
         self.write({'ok': True, 'name': os.path.basename(path)})
 
+class SfzBuilderBankRename(JsonRequestHandler):
+    @jsoncall
+    def post(self):
+        body = self.request.body
+        try:
+            name = rename_bank(body.get('name'), body.get('new_name'))
+        except (ValueError, OSError) as e:
+            self.write({'ok': False, 'error': str(e)})
+            return
+        self.write({'ok': True, 'name': name})
+
+class SfzBuilderBankDelete(JsonRequestHandler):
+    @jsoncall
+    def post(self):
+        try:
+            name = delete_bank(self.request.body.get('name'))
+        except (ValueError, OSError) as e:
+            self.write({'ok': False, 'error': str(e)})
+            return
+        self.write({'ok': True, 'name': name})
+
 class SfzBuilderSamples(JsonRequestHandler):
     def get(self):
         try:
@@ -2647,6 +2668,8 @@ application = web.Application(
             # sfz sound-bank builder
             (r"/sfzbuilder/banks/?", SfzBuilderBanks),
             (r"/sfzbuilder/bank/?", SfzBuilderBank),
+            (r"/sfzbuilder/bank/rename/?", SfzBuilderBankRename),
+            (r"/sfzbuilder/bank/delete/?", SfzBuilderBankDelete),
             (r"/sfzbuilder/samples/?", SfzBuilderSamples),
             (r"/sfzbuilder/device/?", SfzBuilderDevice),
             (r"/sfzbuilder/usb/?", SfzBuilderUsb),

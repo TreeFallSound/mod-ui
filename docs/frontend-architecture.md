@@ -101,8 +101,21 @@ These are LESS variables. LESS variables are constants. They are gone after the 
 
 An island puts its design values in CSS custom properties.
 The LESS rules then read these properties.
-Custom properties operate at run time.
-Thus you can change the density for the small screen of the pi-stomp.
+Custom properties operate at run time. A LESS variable does not exist after the
+compile, so nothing can read it and nothing can change it.
+
+Three things follow from that, and they are the reason for the rule:
+
+* One value changes every rule that reads it. The accent of the SFZ builder
+  moved from orange to purple in one line.
+* A media query, or a class on the panel, can give a token a different value.
+  A LESS variable cannot do this at all.
+* A test can read a token. See the note on the accent below.
+
+mod-ui is a web page in a browser -- a laptop, and sometimes a tablet or a
+phone. It is **not** what the LCD of the pi-stomp shows: that screen belongs to
+the `pi-stomp` application, which talks to this server over WebSocket and MIDI
+and draws nothing from `html/`. Do not size a panel for that LCD.
 
 Put the tokens on `:root`, not on the root element of the island, and start
 every name with the name of the island, for example `--sfz-`.
@@ -217,8 +230,9 @@ The `!important` is not decoration. Nothing except `!important` beats an
 `!important` declaration, and the rule above is the one that has to win.
 The offset is negative so that the ring is drawn inside the edge of the element:
 a ring outside the edge is cut by any list or grid that scrolls.
-The second rule takes the ring off a press, which matters on the touch screen of
-the device, where a tap would else leave a ring behind.
+The second rule takes the ring off a press, which matters wherever the page is
+opened by touch -- a tablet or a phone -- where a tap would else leave a ring
+behind.
 A browser that does not know `:focus-visible` drops that rule and shows the ring
 for a press as well, which is the safe way for it to fail.
 
@@ -278,6 +292,54 @@ cache across eight redraws and asks that neither one grows. Before the fix, the
 pads and the sample rows of the SFZ builder leaked eighty droppables and
 ninety-six data entries over those eight draws, and the panel draws again on
 every click of a pad and every keystroke of the filter.
+
+### 4.12 Read what `main.less` already declares on every element
+
+`main.less` holds a second rule of the same shape as the one in 4.10:
+
+    * {
+      font-family: "cooper hewitt", Sans-serif !important;
+    }
+
+A universal selector with `!important` is the strongest thing a stylesheet can
+say about a property.
+It is not beaten by a longer selector, by a later rule, or by the identifier
+that every island rule starts with.
+It also lands on each element of the panel one by one, so it beats inheritance
+as well: the island named `var(--sfz-mono)` on `#sfzbuilder-library`, the rule
+above named the page font on every child of it, and the child won.
+The panel thus drew in the page font from the day it was written, and read
+nothing at all from its two font tokens.
+Nothing failed and nothing was logged; the header was where you saw it, as a
+title in the wrong font, wide enough in that font to push the tool row onto a
+line of its own.
+
+Two things follow.
+
+**Grep `main.less` for `!important` before you write a stylesheet.**
+There are only a few such rules and they are the ones that will silently
+overrule you. Today they cover `outline` and `font-family`.
+
+**A property you have to win, you win on every element, not on the panel.**
+
+    #sfzbuilder-library,
+    #sfzbuilder-library * {
+      font-family: var(--sfz-mono) !important;
+    }
+
+The descendant half of the selector is what does the work.
+A later rule of the island that names a class -- the status line asks for the
+sans token -- still wins, because a class beats the `*`.
+An element the island puts outside the panel needs the same treatment: the drag
+helper of the SFZ builder lives on the body and carries a pair of rules of its
+own.
+
+**Have a test read it.**
+A rule that loses is invisible in the file, so the smoke test reads the computed
+`font-family` of the title and of an element nested inside the panel and
+compares each against the token, as 4.5 asks.
+The nested element is the part that matters: the panel had the right family on
+itself while everything inside it had the page font.
 
 ## 5. Examples
 
@@ -494,6 +556,13 @@ Each of these is now a rule above, and each came from a fault in the panel.
    when the code breaks (4.5).
 7. An island draws its own elements, so it takes them down itself, and a native
    `removeChild` leaks every jQuery UI widget on them (4.11).
+8. `* { font-family: ... !important }` in `main.less` beat the font tokens on
+   every element of the panel, and the panel drew in the page font from the day
+   it was written (4.12). The same shape of rule as 4: read what `main.less`
+   already says about a property before you say it yourself.
+9. Space between two rows of a header belongs in a `gap`, not in a margin on
+   the row above. The tool row of the SFZ builder is hidden while no bank is
+   open, and the margin under the title row was drawn all the same.
 
 ### Open questions
 
