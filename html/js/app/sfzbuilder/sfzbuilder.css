@@ -54,6 +54,12 @@
   --sfz-snap: 80ms;
   /* The least width of the note stepper value. See .sfz-tokenbox. */
   --sfz-token-w: 76px;
+  /* The least width of a pad. See .sfz-grid: a column stretches to fill the
+     space it is given but never goes under this, and the grid scrolls sideways
+     once the chosen number of columns no longer fits. Below about this width
+     the file name of a pad shows two or three letters and the mini steppers
+     lose their digits. Tune this one value to trade legibility for columns. */
+  --sfz-pad-min: 140px;
   /* The focus ring. A light neutral, not the accent: the ring has to be legible
      on the accent itself, which fills a bank row and a pad while they hold the
      selection. */
@@ -86,22 +92,49 @@
 #sfzbuilder-library * { box-sizing: border-box; }
 
 /* The shared header bar is the one part of the panel that is not the island's
-   own. main.less draws it for every library panel (#bank-library, #file-manager
-   -library, #patchstorage-library ...) as an upper-case title in the page font,
-   and the panel has to read as one of that set. The mono rule above lands on it
-   too, though, and a monospace "SOUND BANK BUILDER" is both wider and visibly a
-   different typeface from "USER BANKS" one panel over. So the header, and it
-   alone, goes back to the page font. text-transform is repeated here rather
-   than left to main.less so the rule stands on its own if that file changes.
+   own. main.less draws it for every library panel (#bank-library,
+   #file-manager-library, #patchstorage-library ...), and the bar of this panel
+   has to be indistinguishable from theirs -- the same face, the same weight,
+   the same grey, the same place on the line -- because you see two of them in a
+   row as you move between panels and anything off reads as a fault.
 
-   The colour is brighter than the #999 main.less gives the other headers, which
-   is the same lift the tokens above make across the panel. */
+   So the whole header opts out of the island and takes the page style back:
+
+   font-family    The mono rule above lands on the header too, and a monospace
+                  "SOUND BANK BUILDER" is both wider and plainly a different
+                  face from "USER BANKS" one panel over. The value here is the
+                  one from main.less `* { font-family: "cooper hewitt",
+                  Sans-serif !important }`, character for character, so the
+                  fallback matches as well if the web font fails to load.
+   font-smoothing The panel sets antialiased on itself and that inherits into
+                  the header, where it thins the strokes: the title came out
+                  visibly lighter than the same words on the panel next door.
+                  auto puts the header back on the rendering of the page.
+   font-variant-numeric
+                  tabular-nums is set on the panel and inherits. It changes the
+                  digits, which the title of this panel has none of today, but
+                  the other headers do not carry it. letter-spacing is normal
+                  for the same reason: an earlier pass tracked the title out by
+                  .04em, and next to an untracked "USER BANKS" it read wrong.
+   color, text-transform
+                  main.less already gives these to `#sfzbuilder-library header
+                  h1`. They are repeated so the header stands on its own if that
+                  selector list ever loses this panel; #999 is its value.
+
+   Anything you want to change about the look of this bar belongs in main.less
+   with the other panels, not here. This block only stops the island from
+   reaching in. */
 #sfzbuilder-library header,
 #sfzbuilder-library header * {
-  font-family: "cooper hewitt", var(--sfz-sans) !important;
+  font-family: "cooper hewitt", Sans-serif !important;
+  -webkit-font-smoothing: auto;
+  letter-spacing: normal;
+  font-variant-numeric: normal;
 }
 #sfzbuilder-library header h1 {
   text-transform: uppercase;
+  font-weight: normal;
+  color: #999;
 }
 
 /* The scroll bars.
@@ -479,15 +512,25 @@
 
 /* min-height:0 is needed. A flex child that scrolls has an automatic minimum
    height of its content. Without this it grows past the panel and draws over
-   the page behind it. */
+   the page behind it. min-width:0 is the same rule on the other axis, and it is
+   what lets the grid scroll sideways instead of pushing the panel wider.
+
+   The column count is what you asked for and nothing else picks it: the grid
+   never re-flows your eight pads into six rows of four. A column stretches to
+   fill whatever space is going, down to --sfz-pad-min and no further, and once
+   the count no longer fits at that width the grid scrolls sideways. So the far
+   end of the range is a choice you can still see, not one the panel silently
+   refuses. auto-fill would have been the other reading of "min width", but it
+   takes the count away from you, which is the one thing the stepper is for. */
 #sfzbuilder-library .sfz-grid {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
+  min-width: 0;
+  overflow: auto;
   padding: 14px 14px 18px;
   display: grid;
   gap: 6px;
-  grid-template-columns: repeat(var(--sfz-cols, 4), minmax(0, 1fr));
+  grid-template-columns: repeat(var(--sfz-cols, 4), minmax(var(--sfz-pad-min), 1fr));
   grid-auto-rows: minmax(150px, auto);
   align-content: start;
 }
