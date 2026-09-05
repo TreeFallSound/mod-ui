@@ -153,6 +153,12 @@ When a check fails, read it again before you change the panel. Two checks of the
 tab order were themselves wrong: one assumed that pad 1 held controls, and one
 let the last pad reach past the grid to the end of the panel.
 
+The page answers its own `confirm`. A headless browser stops on a dialog and the
+run does not end, so the test replaces `window.confirm` once at the top, keeps
+the answer in a variable, and keeps the question in another. A check that wants
+the other answer sets the variable and puts it back. Do the same for `prompt`
+and `alert` if a panel ever opens one.
+
 ### 4.7 Make the state explicit
 
 Keep the state in one object.
@@ -161,6 +167,33 @@ The view is a function of the state.
 
 This is not a framework. This is approximately 30 lines of code.
 The result is one place to write log messages. It is also one place to stop the debugger.
+
+**A control sends what it changed, not the object it was drawn from.**
+Some controls must not draw the panel again. The gain of a pad in the SFZ
+builder is one: a redraw takes the focus out of the box you are typing in.
+The first version let those controls write into the pad object directly, which
+kept the panel still but put the change outside the store, so nothing that
+watches the store -- the mark that says the work is unsaved, a log line, the
+debugger -- ever saw it. It also left each control holding an object that the
+store was free to replace.
+Send the index and the one field instead, and let the store make the new pad.
+A control that changes nothing the state holds -- how many pads fit on a line,
+which is how you look at the bank rather than what the bank is -- stays out of
+the store and out of the flag.
+
+**An answer belongs to the view that asked for it.**
+An island that asks for three things at once, and lets you change what it is
+showing while they are in the air, will get them back out of order.
+The SFZ builder asks for the sample list, the files of the bank and the pad
+layout in three requests; click bank A and then bank B and the answers for A
+can land last and draw the pads of A over the bank of B.
+Keep a number that counts the views. Each request keeps the number the panel had
+when it went out, and an answer that comes back to a different number is dropped
+-- the request that replaced it is already on its way.
+Raise the number wherever what the answers are for changes: a new bank, a new
+sample source, a bank that goes away.
+The smoke test holds one bank's answer back, clicks past it, and asks that the
+answer never lands.
 
 ### 4.8 Vendor the dependencies
 
@@ -563,6 +596,15 @@ Each of these is now a rule above, and each came from a fault in the panel.
 9. Space between two rows of a header belongs in a `gap`, not in a margin on
    the row above. The tool row of the SFZ builder is hidden while no bank is
    open, and the margin under the title row was drawn all the same.
+10. A path that arrives from the browser is not checked by anything before the
+    handler that uses it. `build_bank` copied from any absolute path whose name
+    ended in an audio extension, and it now takes one only from the places the
+    panel lists samples from.
+11. A list the panel keeps a second copy of drifts. `model.js` holds the audio
+    extensions again, so the panel can drop a file the server would refuse
+    before it sends a batch; a test reads both files and asks that they agree.
+    Do this for the copy or delete the copy. Do not leave a comment asking the
+    next person to remember.
 
 ### Open questions
 

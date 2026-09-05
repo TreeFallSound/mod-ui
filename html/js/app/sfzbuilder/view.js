@@ -225,6 +225,11 @@ export function createLayout(root, handlers) {
         type: 'button', text: 'Delete', title: 'Remove this bank and every file in it',
         onclick: handlers.onDeleteBank,
     })
+    // The mark that says the pads hold a change no save wrote. It is a sibling
+    // of the title and not a character added to it, so the name of the bank
+    // stays the text of the title alone -- the ellipsis of a long name would
+    // else eat the mark, and a screen reader would read it as part of the name.
+    const dirtyMark = h('span.sfz-dirty', { text: 'Unsaved', hidden: true })
     const status = h('span.sfz-status')
 
     const padStepper = makeStepper({
@@ -269,7 +274,7 @@ export function createLayout(root, handlers) {
         // soon as the centre column went under about 490px, which read as an
         // empty line under the title.
         h('div.sfz-head', {}, [
-            h('div.sfz-head-top', {}, [title, status,
+            h('div.sfz-head-top', {}, [title, dirtyMark, status,
                 h('div.sfz-head-right', {}, [renameButton, deleteButton, saveButton])]),
             tools,
         ]),
@@ -330,7 +335,7 @@ export function createLayout(root, handlers) {
 
     return {
         root, header, panel, rail, bankList, addBank,
-        title, saveButton, renameButton, deleteButton, tools, status,
+        title, saveButton, renameButton, deleteButton, tools, status, dirtyMark,
         grid, emptyState,
         sourceButtons, uploadInput, search, sampleList,
         overlay, overlaySub,
@@ -362,6 +367,7 @@ export function renderBankView(el, state) {
     show(el.emptyState, !bank)
     show(el.grid, !!bank)
     show(el.tools, !!bank)
+    el.dirtyMark.hidden = !bank || !state.dirty
     for (const button of [el.saveButton, el.renameButton, el.deleteButton]) {
         // @ts-ignore - a button has `disabled`.
         button.disabled = !bank
@@ -569,7 +575,7 @@ export function renderSamples(el, state, handlers) {
 /**
  * Draws the pads.
  *
- * The gain, root and loop controls change the pad object directly. They do not
+ * The gain, root and loop controls send one field each to `onEdit`. They do not
  * draw the pads again, so the focus stays in the box while you type.
  *
  * @param {Elements} el
@@ -580,6 +586,7 @@ export function renderSamples(el, state, handlers) {
  * @param {(index: number) => void} handlers.onClear
  * @param {(button: HTMLElement, fullname: string) => void} handlers.onPlay
  * @param {(slot: import('./model.js').Slot) => string} handlers.previewUrl
+ * @param {(index: number, patch: Partial<import('./model.js').Slot>) => void} handlers.onEdit
  */
 export function renderSlots(el, state, handlers) {
     const $ = jq()
@@ -636,7 +643,7 @@ export function renderSlots(el, state, handlers) {
                     + (slot ? ', ' + slot.sample : ', free')
                     + (idx === state.selectedSlot ? ', selected' : ''),
             },
-            [head, slot ? padProps(slot) : h('div.sfz-pad-free', { text: '— FREE —' })]),
+            [head, slot ? padProps(slot, idx, handlers.onEdit) : h('div.sfz-pad-free', { text: '— FREE —' })]),
             () => handlers.onSelect(idx), 'group')
 
         // Each pad takes its own drop, so a sample lands where you put it.
@@ -671,16 +678,24 @@ function padIndex(idx) {
 /**
  * Makes the gain, root and loop controls of one pad.
  * One control on each line. This keeps a pad legible at six columns.
- * @param {import('./model.js').Slot} slot
+ *
+ * A control sends the index of its pad and the one field it changed, never the
+ * pad object it was drawn from. The pads are not drawn again while you edit --
+ * the focus has to stay in the box you are typing in -- so a control that held
+ * the object would go on writing into a pad that the store had already
+ * replaced.
+ * @param {import('./model.js').Slot} slot The values the controls open with.
+ * @param {number} idx
+ * @param {(index: number, patch: Partial<import('./model.js').Slot>) => void} onEdit
  * @returns {HTMLElement}
  */
-function padProps(slot) {
+function padProps(slot, idx, onEdit) {
     const gain = makeStepper({
         min: -144, max: 48, value: typeof slot.volume === 'number' ? slot.volume : null,
         nullable: true, start: 0, placeholder: '0',
         className: 'sfz-step--mini',
         title: 'Gain in dB. An empty box means no change.',
-        onSet: (v) => { slot.volume = v },
+        onSet: (v) => onEdit(idx, { volume: v }),
     })
 
     // The root note has no value by default. sfizz then plays the sample at the
@@ -691,12 +706,12 @@ function padProps(slot) {
         nullable: true, start: model.DEFAULT_BASE_NOTE, placeholder: 'AUTO',
         className: 'sfz-step--mini',
         title: 'The note that plays the sample at the written speed. Empty is automatic.',
-        onSet: (v) => { slot.pitch = v },
+        onSet: (v) => onEdit(idx, { pitch: v }),
     })
 
     const loop = /** @type {HTMLSelectElement} */ (h('select.sfz-select', {
         title: 'What happens when you release the pad',
-        onchange: () => { slot.loop = loop.value },
+        onchange: () => onEdit(idx, { loop: loop.value }),
     }, [
         h('option', { value: 'one_shot', text: 'ONE_SHOT' }),
         h('option', { value: 'no_loop', text: 'NO_LOOP' }),

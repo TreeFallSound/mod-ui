@@ -417,3 +417,94 @@ class TestRenameAndDelete(unittest.TestCase):
         with self.assertRaises(ValueError):
             sfzbuilder.delete_bank("Escape")
         self.assertTrue(os.path.isfile(os.path.join(outside, "precious.wav")))
+
+
+class TestNoteCeiling(unittest.TestCase):
+    # A free pad needs no note, so free pads at the end must not stop a save.
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self._real = sfzbuilder.USER_FILES_DIR
+        sfzbuilder.USER_FILES_DIR = self.tmp
+        path = sfzbuilder.create_bank("Kit")
+        make_wav(os.path.join(path, "kick.wav"))
+
+    def tearDown(self):
+        sfzbuilder.USER_FILES_DIR = self._real
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _slot(self):
+        return {"sample": "kick.wav", "source": None, "loop_mode": "one_shot"}
+
+    def test_free_pads_past_the_last_note_are_allowed(self):
+        # Base 120 with 8 pads runs to note 127 on the last pad. Only the first
+        # holds a sample, so the other seven need nothing.
+        slots = [self._slot()] + [None] * 7
+        self.assertEqual(sfzbuilder.build_bank("Kit", 126, slots)["count"], 1)
+
+    def test_a_filled_pad_past_the_last_note_is_refused(self):
+        slots = [None] * 7 + [self._slot()]
+        with self.assertRaises(ValueError):
+            sfzbuilder.build_bank("Kit", 126, slots)
+
+    def test_the_last_note_itself_is_allowed(self):
+        slots = [None, self._slot()]
+        self.assertEqual(sfzbuilder.build_bank("Kit", 126, slots)["count"], 1)
+
+
+class TestExternalSource(unittest.TestCase):
+    # The path of an external sample comes from the browser. Nothing else checks
+    # it, so build_bank must, or a bank could copy any readable audio file.
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.files = os.path.join(self.tmp, "user-files")
+        os.makedirs(self.files)
+        self._real = sfzbuilder.USER_FILES_DIR
+        sfzbuilder.USER_FILES_DIR = self.files
+        sfzbuilder.create_bank("Kit")
+
+    def tearDown(self):
+        sfzbuilder.USER_FILES_DIR = self._real
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _build(self, source):
+        return sfzbuilder.build_bank("Kit", 36, [
+            {"sample": os.path.basename(source), "source": source,
+             "loop_mode": "one_shot"},
+        ])
+
+    def test_a_sample_under_user_files_is_copied(self):
+        source = os.path.join(self.files, "Loops", "kick.wav")
+        make_wav(source)
+        self.assertEqual(self._build(source)["count"], 1)
+        self.assertTrue(os.path.isfile(
+            os.path.join(sfzbuilder.bank_dir("Kit"), "kick.wav")))
+
+    def test_a_sample_from_anywhere_else_is_refused(self):
+        source = os.path.join(self.tmp, "elsewhere", "secret.wav")
+        make_wav(source)
+        with self.assertRaises(ValueError):
+            self._build(source)
+
+    def test_a_link_that_points_out_is_refused(self):
+        outside = os.path.join(self.tmp, "elsewhere", "secret.wav")
+        make_wav(outside)
+        link = os.path.join(self.files, "kick.wav")
+        os.symlink(outside, link)
+        with self.assertRaises(ValueError):
+            self._build(link)
+
+
+class TestExtensionsAgree(unittest.TestCase):
+    # model.js keeps its own copy of the list, because the panel removes the
+    # files the server would refuse before it sends a batch. The two lists have
+    # to say the same thing or the panel drops a file the server accepts.
+    def test_the_panel_knows_the_same_audio_types(self):
+        import re
+        here = os.path.dirname(os.path.abspath(__file__))
+        js = os.path.join(here, "..", "html", "js", "app", "sfzbuilder", "model.js")
+        with open(js) as fh:
+            text = fh.read()
+        body = re.search(r"export const AUDIO_EXTENSIONS = \[(.*?)\]", text, re.S)
+        self.assertIsNotNone(body, "AUDIO_EXTENSIONS is not in model.js any more")
+        found = tuple(re.findall(r"'([^']+)'", body.group(1)))
+        self.assertEqual(found, sfzbuilder.AUDIO_EXTENSIONS)

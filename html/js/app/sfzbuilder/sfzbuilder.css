@@ -102,8 +102,6 @@
 }
 #sfzbuilder-library header h1 {
   text-transform: uppercase;
-  letter-spacing: .04em;
-  color: #d4d4d4;
 }
 
 /* The scroll bars.
@@ -449,6 +447,21 @@
 }
 #sfzbuilder-library .sfz-tools { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
 #sfzbuilder-library .sfz-field { display: flex; gap: 6px; align-items: center; }
+/* The mark that says the pads hold a change no save wrote. It reads as a word,
+   not as a dot: a dot beside a name means a different thing in every program
+   that draws one. */
+#sfzbuilder-library .sfz-dirty {
+  flex: 0 0 auto;
+  border: 1px solid var(--sfz-accent);
+  color: var(--sfz-accent);
+  font-size: 9px;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  font-weight: 700;
+  padding: 2px 7px;
+  align-self: center;
+}
+
 /* The status takes what the title leaves and gives the rest back to the Save
    button, so a long message can never push Save off the line. */
 #sfzbuilder-library .sfz-status {

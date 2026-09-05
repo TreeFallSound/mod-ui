@@ -65,6 +65,16 @@ function accentRgba(alpha) {
   var parts = accentRgb().match(/\d+/g) || [];
   return 'rgba(' + parts.slice(0, 3).join(', ') + ', ' + alpha + ')';
 }
+// A confirm box stops a headless browser dead, so the page answers its own.
+// CONFIRM_ANSWER is what it says and CONFIRM_ASKED is the last question, so a
+// check can read both. The panel asks before it drops unsaved pads and before
+// it deletes a bank.
+var CONFIRM_ANSWER = true, CONFIRM_ASKED = '';
+// The bank whose sample list the miniature server answers late. See the race
+// check at the end of the test.
+var SLOW_BANK = '';
+window.confirm = function (message) { CONFIRM_ASKED = message; return CONFIRM_ANSWER; };
+
 window.onerror = function (m, s, l, c, e) { check('no script error', false, m + ' ' + ((e && e.stack) || '')); };
 window.addEventListener('unhandledrejection', function (e) {
   check('no rejected promise', false, (e.reason && (e.reason.stack || e.reason.message)) || e.reason);
@@ -84,6 +94,14 @@ $.ajax = function (o) {
       d.resolve({ ok: true, name: JSON.parse(o.data).name });
     } else if (u.indexOf('/sfzbuilder/bank') === 0) {
       d.resolve({ ok: true, base_note: 36, slots: [] });
+    } else if (u.indexOf('/sfzbuilder/samples') === 0 && o.data.bank === SLOW_BANK) {
+      // The answer for this bank comes back late, after the answer for the
+      // bank that was clicked next. It must not reach the panel.
+      setTimeout(function () {
+        d.resolve({ ok: true, files: [
+          { basename: 'STALE.wav', fullname: '/a/STALE.wav', size: 1 }] });
+      }, 250);
+      return;
     } else if (u.indexOf('/sfzbuilder/samples') === 0) {
       d.resolve({ ok: true, files: [
         { basename: 'Kick_01.wav', fullname: '/a/Kick_01.wav', size: 412000 },
@@ -198,6 +216,37 @@ setTimeout(function () {
         check('the drop puts the sample on the pad',
               root.querySelectorAll('.sfz-pad--filled').length === 1);
         check('the helper goes away', !document.querySelector('.sfz-drag-helper'));
+        // Unsaved work. The drop above put a sample on a pad, which is a
+        // change the sidecar keeps, so the panel has to say so.
+        var mark = root.querySelector('.sfz-dirty');
+        check('the panel says the pads hold an unsaved change', mark && !mark.hidden);
+
+        // A gain, a root note or a loop mode is a change too, and none of the
+        // three draws the pads again: the focus has to stay in the box you are
+        // typing in.
+        var padStep = root.querySelector('.sfz-pad--filled .sfz-step--mini input');
+        if (padStep) {
+          padStep.focus();
+          padStep.value = '-6';
+          padStep.dispatchEvent(new Event('change', { bubbles: true }));
+          check('an edit inside a pad keeps the focus where it was',
+                document.activeElement === padStep);
+        }
+
+        // A bank that is not the open one asks before it drops the work.
+        CONFIRM_ANSWER = false;
+        CONFIRM_ASKED = '';
+        var other = root.querySelectorAll('.sfz-bank')[1];
+        other.click();
+        check('another bank asks before it drops the work',
+              CONFIRM_ASKED.indexOf('unsaved modifications') > 0, JSON.stringify(CONFIRM_ASKED));
+        check('a refused confirm keeps the bank that is open',
+              root.querySelector('.sfz-title').textContent === 'Drumkit A',
+              root.querySelector('.sfz-title').textContent);
+        check('a refused confirm leaves the selection where it was',
+              root.querySelectorAll('.sfz-bank')[0].classList.contains('sfz-bank--on'));
+        CONFIRM_ANSWER = true;
+
         // The note stepper must keep one width. Its content goes from four to
         // seven characters, so a box that sizes to its content moves the minus
         // and the plus under the pointer while you step through the notes.
@@ -451,8 +500,15 @@ setTimeout(function () {
             return n.textContent;
           });
         };
+        // A save writes what the pads hold, so the mark goes.
+        root.querySelector('.sfz-save').click();
+
         check('the panel lists the banks it was given',
               bankNames().join() === 'Drumkit A,Foley', bankNames().join());
+
+        setTimeout(function () {
+        check('a save takes the unsaved mark away',
+              root.querySelector('.sfz-dirty').hidden);
 
         var renameButton = root.querySelector('.sfz-btn--quiet');
         renameButton.click();
@@ -486,20 +542,38 @@ setTimeout(function () {
                 root.querySelector('.sfz-title').textContent === 'Kit_A',
                 root.querySelector('.sfz-title').textContent);
 
-          var realConfirm = window.confirm;
-          var asked = '';
-          window.confirm = function (message) { asked = message; return false; };
+          CONFIRM_ANSWER = false;
+          CONFIRM_ASKED = '';
           root.querySelector('.sfz-btn--danger').click();
           check('delete asks before it removes anything',
-                asked.indexOf('cannot be undone') > 0, JSON.stringify(asked));
+                CONFIRM_ASKED.indexOf('cannot be undone') > 0, JSON.stringify(CONFIRM_ASKED));
           check('a refused confirm removes nothing',
                 root.querySelector('.sfz-title').textContent === 'Kit_A');
-          window.confirm = realConfirm;
+          CONFIRM_ANSWER = true;
 
-          var panel = root.querySelector('.sfz-panel');
-          note('panel columns:', getComputedStyle(panel).gridTemplateColumns);
-          note('colour scheme:', getComputedStyle(root).colorScheme);
-          finish();
+          // A slow answer for a bank you left must not draw over the bank
+          // you are on. Click the slow bank, then the next one, and wait past
+          // the slow answer.
+          SLOW_BANK = 'Drumkit A';
+          var rows = root.querySelectorAll('.sfz-bank');
+          rows[0].click();
+          rows[1].click();
+          setTimeout(function () {
+            var names = [].map.call(root.querySelectorAll('.sfz-sample-name'),
+                                    function (n) { return n.textContent; });
+            check('the open bank is the one that was clicked last',
+                  root.querySelector('.sfz-title').textContent === 'Foley',
+                  root.querySelector('.sfz-title').textContent);
+            check('a late answer for a bank you left is dropped',
+                  names.indexOf('STALE.wav') < 0, names.join());
+            SLOW_BANK = '';
+
+            var panel = root.querySelector('.sfz-panel');
+            note('panel columns:', getComputedStyle(panel).gridTemplateColumns);
+            note('colour scheme:', getComputedStyle(root).colorScheme);
+            finish();
+          }, 500);
+        }, 200);
         }, 200);
       }, 200);
     }, 400);

@@ -91,6 +91,23 @@ export function mount(root) {
 
     const store = createStore(() => { /* the draws below are explicit */ })
 
+    // Which view of the panel the answers coming back belong to.
+    //
+    // The panel asks for the sample list, the files of the bank and the pad
+    // layout in three requests that do not wait for each other. Click bank A
+    // and then bank B and the answers for A can land after the answers for B,
+    // which drew the pads of A over the bank of B. Each request keeps the
+    // number the panel had when it went out, and an answer that comes back to
+    // a different number is dropped: the request that replaced it is already
+    // on its way.
+    let generation = 0
+
+    /** @returns {() => boolean} A test that says whether the answer still fits. */
+    function fresh() {
+        const mine = generation
+        return () => mine === generation
+    }
+
     // One player for the full panel, so only one sample sounds at a time.
     /** @type {HTMLAudioElement|null} */
     let player = null
@@ -120,6 +137,47 @@ export function mount(root) {
     function setStatus(message, isError) {
         store.update({ status: message, statusIsError: !!isError })
         view.renderStatus(el, message, !!isError)
+    }
+
+    /**
+     * Says that the pads hold a change that no save wrote.
+     *
+     * Everything the sidecar keeps counts: which sample is on which pad, the
+     * gain, the root note, the loop mode, the pad count and the base note. The
+     * column count does not -- that is how you look at the bank, not what the
+     * bank is, and it lives in the browser rather than on the device.
+     */
+    function markDirty() {
+        if (store.get().dirty) {
+            return
+        }
+        store.update({ dirty: true })
+        drawBankView()
+    }
+
+    /** @param {boolean} [saved] */
+    function markClean(saved) {
+        if (!store.get().dirty) {
+            return
+        }
+        store.update({ dirty: false })
+        if (saved !== false) {
+            drawBankView()
+        }
+    }
+
+    /**
+     * Asks before a step that would drop the changes the pads hold.
+     *
+     * The words are the ones the legacy panels use for the same question, so
+     * the answer means the same thing wherever you meet it.
+     * @returns {boolean} Whether to go on.
+     */
+    function confirmDiscard() {
+        if (!store.get().dirty) {
+            return true
+        }
+        return window.confirm('There are unsaved modifications that will be lost. Are you sure?')
     }
 
     function stopPreview() {
@@ -185,6 +243,7 @@ export function mount(root) {
             onClear: clearSlot,
             onPlay: playPreview,
             previewUrl: previewUrl,
+            onEdit: editSlot,
         })
     }
 
@@ -220,7 +279,28 @@ export function mount(root) {
         const slots = store.get().slots.slice()
         slots[idx] = null
         store.update({ slots: slots })
+        markDirty()
         drawSlots()
+    }
+
+    /**
+     * Changes one field of one pad.
+     *
+     * The pads are not drawn again: the change came from a control inside the
+     * pad and a redraw would take the focus out of it while you type.
+     * @param {number} idx
+     * @param {Partial<import('./model.js').Slot>} patch
+     */
+    function editSlot(idx, patch) {
+        const state = store.get()
+        const slot = state.slots[idx]
+        if (!slot) {
+            return
+        }
+        const slots = state.slots.slice()
+        slots[idx] = Object.assign({}, slot, patch)
+        store.update({ slots: slots })
+        markDirty()
     }
 
     /**
@@ -235,6 +315,7 @@ export function mount(root) {
         const slots = state.slots.slice()
         slots[idx] = model.slotFromSample(entry, state.source)
         store.update({ slots: slots, selectedSlot: -1 })
+        markDirty()
         setStatus(entry.basename + ' put on pad ' + (idx + 1))
         drawSlots()
     }
@@ -255,6 +336,7 @@ export function mount(root) {
         store.update({ padCount: count })
         if (slots.length !== count) {
             store.update({ slots: model.resizePads(slots, count) })
+            markDirty()
         }
         drawSlots()
     }
@@ -268,12 +350,17 @@ export function mount(root) {
 
     /** @param {number|null} note */
     function setBaseNote(note) {
-        store.update({ baseNote: model.clampBaseNote(note) })
+        const next = model.clampBaseNote(note)
+        if (next !== store.get().baseNote) {
+            store.update({ baseNote: next })
+            markDirty()
+        }
         drawSlots()
     }
 
     /** @param {string} source */
     function setSource(source) {
+        generation++
         store.update({ source: source })
         drawBankView()
         refreshSamples()
@@ -281,7 +368,11 @@ export function mount(root) {
 
     function refreshSamples() {
         const state = store.get()
+        const still = fresh()
         api.listSamples(state.source, state.currentBank).then((resp) => {
+            if (!still()) {
+                return
+            }
             if (!resp.ok) {
                 setStatus(resp.error, true)
                 return
@@ -309,8 +400,9 @@ export function mount(root) {
             store.update({ bankFiles: [] })
             return Promise.resolve()
         }
+        const still = fresh()
         return api.listSamples('bank', bank).then((resp) => {
-            if (resp.ok) {
+            if (resp.ok && still()) {
                 store.update({ bankFiles: resp.files || [] })
                 drawSlots()
             }
@@ -340,7 +432,11 @@ export function mount(root) {
         if (!bank) {
             return
         }
+        const still = fresh()
         api.loadBank(bank).then((resp) => {
+            if (!still()) {
+                return
+            }
             if (!resp.ok) {
                 setStatus(resp.error, true)
                 return
@@ -358,6 +454,11 @@ export function mount(root) {
                 })
                 el.padStepper.set(padCount)
                 el.baseStepper.set(model.DEFAULT_BASE_NOTE)
+                // The two lines above run the same handlers a click on the
+                // stepper runs, so they say the bank changed. The bank was
+                // read, not changed, so the flag goes down after them, never
+                // before.
+                markClean()
                 drawSlots()
                 return
             }
@@ -366,6 +467,7 @@ export function mount(root) {
             store.update({ slots: aligned, padCount: aligned.length, baseNote: baseNote })
             el.padStepper.set(aligned.length)
             el.baseStepper.set(baseNote)
+            markClean()
             drawSlots()
         }, () => setStatus('Failed to load the bank', true))
     }
@@ -375,8 +477,16 @@ export function mount(root) {
         if (store.get().currentBank === name) {
             return
         }
+        if (!confirmDiscard()) {
+            // The row that was clicked wears the selection for a moment before
+            // the answer comes back, so the list is drawn again from the state,
+            // which still holds the bank that stays open.
+            drawBanks()
+            return
+        }
         stopPreview()
-        store.update({ currentBank: name, selectedSlot: -1, bankFiles: [] })
+        generation++
+        store.update({ currentBank: name, selectedSlot: -1, bankFiles: [], dirty: false })
         // The next visit opens this bank again. See model.pickInitialBank.
         writeSetting(BANK_KEY, name)
         drawBanks()
@@ -418,6 +528,11 @@ export function mount(root) {
         if (!from) {
             return
         }
+        // The panel opens the bank again under its new name, which reads the
+        // layout back from the disk and thus drops whatever the pads hold.
+        if (!confirmDiscard()) {
+            return
+        }
         api.renameBank(from, name).then((resp) => {
             if (!resp.ok) {
                 setStatus(resp.error, true)
@@ -426,7 +541,7 @@ export function mount(root) {
             // currentBank is cleared first so that selectBank does its work:
             // it returns early when the name it is given is already open, and
             // after a rename of "Kit" to "Kit A" the store still says "Kit".
-            store.update({ currentBank: '' })
+            store.update({ currentBank: '', dirty: false })
             loadBanks().then(() => {
                 selectBank(resp.name)
                 setStatus('Renamed to ' + resp.name)
@@ -462,7 +577,8 @@ export function mount(root) {
             // The next visit must not try to open the bank that just went
             // away. refreshAll then falls back to the first bank there is.
             writeSetting(BANK_KEY, '')
-            store.update({ currentBank: '', selectedSlot: -1, bankFiles: [], files: [] })
+            generation++
+            store.update({ currentBank: '', selectedSlot: -1, bankFiles: [], files: [], dirty: false })
             loadBanks().then(() => {
                 const banks = store.get().banks
                 if (banks.length > 0) {
@@ -513,6 +629,7 @@ export function mount(root) {
             const skipped = split.rejected.length
             setStatus(resp.files.length + ' file(s) uploaded'
                 + (skipped ? ', ' + skipped + ' not audio' : ''), skipped > 0)
+            generation++
             store.update({ source: 'bank' })
             drawBankView()
             refreshSamples()
@@ -536,6 +653,7 @@ export function mount(root) {
                 setStatus(resp.error, true)
                 return
             }
+            markClean()
             setStatus('Saved ' + resp.file + ' with ' + resp.count + ' sample(s)')
             refreshBankFiles()
         }, () => setStatus('Save failed', true))
