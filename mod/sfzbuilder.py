@@ -202,6 +202,25 @@ def list_usb_samples():
     return result
 
 
+def sample_roots():
+    # The places the panel lists samples from. An external sample can only come
+    # from one of these, because they are the only ones it shows.
+    roots = [USER_FILES_DIR]
+    if os.path.isdir("/media"):
+        roots.append("/media")
+    return [os.path.realpath(r) for r in roots]
+
+
+def is_allowed_source(path):
+    # The path of an external sample arrives from the browser, so it is not
+    # checked by anything before this. Without the test below a bank could copy
+    # any readable file on the device whose name ends in an audio extension.
+    for root in sample_roots():
+        if path == root or path.startswith(root + os.sep):
+            return True
+    return False
+
+
 def safe_resolve(root, name):
     root = os.path.realpath(root)
     path = os.path.realpath(os.path.join(root, name))
@@ -297,8 +316,14 @@ def build_bank(name, base_note, slots):
     # slots is pad-aligned: a None entry is a free pad and keeps its note number.
     if not any(slot for slot in slots):
         raise ValueError("no slots")
-    if base_note + len(slots) > MAX_NOTES:
-        raise ValueError("too many slots for the base note")
+    # Only a pad that holds a sample needs a note. A bank of eight pads with a
+    # sample on the first one is a bank the panel offers at any base note, and
+    # refusing it because seven empty pads run past 127 was refusing to save
+    # work that is there.
+    last_filled = max(i for i, slot in enumerate(slots) if slot)
+    if base_note + last_filled >= MAX_NOTES:
+        raise ValueError("pad %d would need note %d, and the last note is %d"
+                         % (last_filled + 1, base_note + last_filled, MAX_NOTES - 1))
 
     path = create_bank(name)
     sidecar_path = os.path.join(path, SIDECAR_NAME)
@@ -319,6 +344,8 @@ def build_bank(name, base_note, slots):
         source = slot.get("source")
         if source:
             src = os.path.realpath(source)
+            if not is_allowed_source(src):
+                raise ValueError("sample is not in a place the panel reads: %s" % source)
             if not is_audio_file(src):
                 raise ValueError("source is not an audio file: %s" % src)
             dest = old_copied.get(src)

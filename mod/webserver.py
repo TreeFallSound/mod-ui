@@ -2418,6 +2418,15 @@ class SfzBuilderUsb(JsonRequestHandler):
     def get(self):
         self.write({'ok': True, 'files': _audio_file_entries(list_usb_samples())})
 
+# The most one upload may carry, for each file and for the batch together.
+#
+# The number is under Tornado's own max_buffer_size, which is 100 MB and which
+# this application does not change. That limit is the real ceiling: Tornado
+# holds the whole request body in memory and drops the connection when the body
+# goes past it, which reaches the panel as a failed request and no reason. The
+# cap below is hit first, so the panel can say what happened instead.
+MAX_UPLOAD_BYTES = 64 * 1024 * 1024
+
 class SfzBuilderUpload(JsonRequestHandler):
     def post(self):
         try:
@@ -2426,19 +2435,37 @@ class SfzBuilderUpload(JsonRequestHandler):
             self.write({'ok': False, 'error': str(e)})
             return
 
-        used = set(os.listdir(path))
-        saved = []
+        # Every file is checked before any file is written. The first version
+        # wrote as it went and returned on the first name that was not audio,
+        # which left the files before it in the bank and told the panel the
+        # upload had failed. A batch now lands whole or not at all.
+        entries = []
+        total = 0
         for upload in self.request.files.values():
             for entry in upload:
                 filename = sanitize_filename(entry['filename'])
                 if not filename.lower().endswith(AUDIO_EXTENSIONS):
                     self.write({'ok': False, 'error': 'not an audio file: %s' % entry['filename']})
                     return
-                filename = unique_filename(filename, used)
-                with open(os.path.join(path, filename), 'wb') as fh:
-                    fh.write(entry['body'])
-                used.add(filename)
-                saved.append(filename)
+                if len(entry['body']) > MAX_UPLOAD_BYTES:
+                    self.write({'ok': False, 'error': '%s is larger than %d MB'
+                                % (entry['filename'], MAX_UPLOAD_BYTES // (1024 * 1024))})
+                    return
+                total += len(entry['body'])
+                if total > MAX_UPLOAD_BYTES:
+                    self.write({'ok': False, 'error': 'that upload is larger than %d MB'
+                                % (MAX_UPLOAD_BYTES // (1024 * 1024))})
+                    return
+                entries.append((filename, entry['body']))
+
+        used = set(os.listdir(path))
+        saved = []
+        for filename, body in entries:
+            filename = unique_filename(filename, used)
+            with open(os.path.join(path, filename), 'wb') as fh:
+                fh.write(body)
+            used.add(filename)
+            saved.append(filename)
 
         self.write({'ok': True, 'files': saved})
 

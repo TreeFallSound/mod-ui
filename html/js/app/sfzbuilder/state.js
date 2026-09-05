@@ -26,6 +26,7 @@ import { DEFAULT_PADS } from './model.js'
  * @property {string} search
  * @property {string} status
  * @property {boolean} statusIsError
+ * @property {boolean} dirty Whether the pads hold a change that no save wrote.
  */
 
 /**
@@ -48,6 +49,7 @@ export function initialState() {
         search: '',
         status: '',
         statusIsError: false,
+        dirty: false,
     }
 }
 
