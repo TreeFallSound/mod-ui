@@ -109,6 +109,8 @@ export function mount(root) {
         onCols: setCols,
         onBaseNote: setBaseNote,
         onSave: save,
+        onRenameBank: () => view.promptRenameBank(el, renameBank),
+        onDeleteBank: removeBank,
     })
 
     /**
@@ -401,6 +403,77 @@ export function mount(root) {
             store.update({ currentBank: '' })
             loadBanks().then(() => selectBank(resp.name))
         }, () => setStatus('Failed to create the bank', true))
+    }
+
+    /**
+     * Changes the name of the current bank.
+     *
+     * The name that reaches the disk is not always the name that was asked
+     * for -- a space becomes an underscore -- so the panel opens the bank
+     * under the name that the server gives back, not the one it sent.
+     * @param {string} name
+     */
+    function renameBank(name) {
+        const from = store.get().currentBank
+        if (!from) {
+            return
+        }
+        api.renameBank(from, name).then((resp) => {
+            if (!resp.ok) {
+                setStatus(resp.error, true)
+                return
+            }
+            // currentBank is cleared first so that selectBank does its work:
+            // it returns early when the name it is given is already open, and
+            // after a rename of "Kit" to "Kit A" the store still says "Kit".
+            store.update({ currentBank: '' })
+            loadBanks().then(() => {
+                selectBank(resp.name)
+                setStatus('Renamed to ' + resp.name)
+            })
+        }, () => setStatus('Rename failed', true))
+    }
+
+    /**
+     * Removes the current bank and everything in it.
+     *
+     * A confirm box asks first, the same way the legacy panels ask before a
+     * change that cannot be undone. The bank holds the samples that were
+     * uploaded to it, so this is not a change you can take back.
+     */
+    function removeBank() {
+        const name = store.get().currentBank
+        if (!name) {
+            return
+        }
+        const count = store.get().bankCounts[name]
+        const held = typeof count === 'number' && count > 0
+            ? ' and the ' + count + ' sample(s) in it'
+            : ''
+        if (!window.confirm('Delete the bank ' + name + held + '? This cannot be undone.')) {
+            return
+        }
+        api.deleteBank(name).then((resp) => {
+            if (!resp.ok) {
+                setStatus(resp.error, true)
+                return
+            }
+            stopPreview()
+            // The next visit must not try to open the bank that just went
+            // away. refreshAll then falls back to the first bank there is.
+            writeSetting(BANK_KEY, '')
+            store.update({ currentBank: '', selectedSlot: -1, bankFiles: [], files: [] })
+            loadBanks().then(() => {
+                const banks = store.get().banks
+                if (banks.length > 0) {
+                    selectBank(banks[0])
+                } else {
+                    drawSamples()
+                    drawSlots()
+                }
+                setStatus('Deleted ' + resp.name)
+            })
+        }, () => setStatus('Delete failed', true))
     }
 
     function uploadFromInput() {

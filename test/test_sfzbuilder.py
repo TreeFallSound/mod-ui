@@ -17,8 +17,13 @@ def make_wav(path):
 
 
 class TestSanitize(unittest.TestCase):
-    def test_spaces_become_underscores(self):
-        self.assertEqual(sfzbuilder.sanitize_filename("kick drum.wav"), "kick_drum.wav")
+    def test_spaces_are_kept(self):
+        # generate_sfz writes sample= last, where the value runs to the end of
+        # the line, so a space in a name is safe.
+        self.assertEqual(sfzbuilder.sanitize_filename("kick drum.wav"), "kick drum.wav")
+
+    def test_surrounding_spaces_are_dropped(self):
+        self.assertEqual(sfzbuilder.sanitize_filename("  kick  .wav"), "kick.wav")
 
     def test_sfz_breaking_chars_removed(self):
         self.assertEqual(sfzbuilder.sanitize_filename("kick=1<2#3.wav"), "kick_1_2_3.wav")
@@ -56,8 +61,8 @@ class TestGenerateSfz(unittest.TestCase):
             {"key": 37, "sample": "02_snare.wav", "volume": None, "pitch_keycenter": 60, "loop_mode": "no_loop"},
         ]
         expected = (
-            "<region> key=36 sample=01_kick.wav volume=-3 loop_mode=one_shot\n"
-            "<region> key=37 sample=02_snare.wav pitch_keycenter=60 loop_mode=no_loop\n"
+            "<region> key=36 volume=-3 loop_mode=one_shot sample=01_kick.wav\n"
+            "<region> key=37 pitch_keycenter=60 loop_mode=no_loop sample=02_snare.wav\n"
         )
         self.assertEqual(sfzbuilder.generate_sfz(regions), expected)
 
@@ -93,13 +98,13 @@ class TestBuildBank(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["count"], 2)
         bank_dir = os.path.join(self.tmp, "SFZ Instruments", "Kit")
-        self.assertTrue(os.path.isfile(os.path.join(bank_dir, "bank.sfz")))
+        self.assertTrue(os.path.isfile(os.path.join(bank_dir, "Kit.sfz")))
         self.assertTrue(os.path.isfile(os.path.join(bank_dir, "loop.wav")))
 
-        with open(os.path.join(bank_dir, "bank.sfz")) as fh:
+        with open(os.path.join(bank_dir, "Kit.sfz")) as fh:
             text = fh.read()
-        self.assertIn("key=36 sample=kick.wav volume=-6 loop_mode=one_shot", text)
-        self.assertIn("key=37 sample=loop.wav loop_mode=no_loop", text)
+        self.assertIn("key=36 volume=-6 loop_mode=one_shot sample=kick.wav", text)
+        self.assertIn("key=37 loop_mode=no_loop sample=loop.wav", text)
 
         # Sidecar tracks the copy.
         with open(os.path.join(bank_dir, "bank.json")) as fh:
@@ -139,7 +144,7 @@ class TestBuildBank(unittest.TestCase):
         bank_dir = os.path.join(self.tmp, "SFZ Instruments", "Kit")
         self.assertTrue(os.path.isfile(os.path.join(bank_dir, "hit.wav")))
         self.assertTrue(os.path.isfile(os.path.join(bank_dir, "hit_1.wav")))
-        with open(os.path.join(bank_dir, "bank.sfz")) as fh:
+        with open(os.path.join(bank_dir, "Kit.sfz")) as fh:
             text = fh.read()
         self.assertIn("sample=hit.wav", text)
         self.assertIn("sample=hit_1.wav", text)
@@ -182,10 +187,10 @@ class TestBuildBank(unittest.TestCase):
         ])
         self.assertEqual(result["count"], 2)
 
-        with open(os.path.join(self.tmp, "SFZ Instruments", "Kit", "bank.sfz")) as fh:
+        with open(os.path.join(self.tmp, "SFZ Instruments", "Kit", "Kit.sfz")) as fh:
             text = fh.read()
-        self.assertIn("key=36 sample=kick.wav", text)
-        self.assertIn("key=38 sample=snare.wav", text)
+        self.assertIn("key=36 loop_mode=one_shot sample=kick.wav", text)
+        self.assertIn("key=38 loop_mode=one_shot sample=snare.wav", text)
         self.assertNotIn("key=37", text)
 
     def test_build_rejects_only_free_pads(self):
@@ -246,3 +251,169 @@ class TestLoadBank(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestBankFilename(unittest.TestCase):
+    # The file selector of a plugin lists an SFZ file by its basename alone, so
+    # every bank writing "bank.sfz" gave a column of identical rows.
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self._real = sfzbuilder.USER_FILES_DIR
+        sfzbuilder.USER_FILES_DIR = self.tmp
+
+    def tearDown(self):
+        sfzbuilder.USER_FILES_DIR = self._real
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _build(self, bank, sample="kick.wav"):
+        path = sfzbuilder.create_bank(bank)
+        make_wav(os.path.join(path, sample))
+        return sfzbuilder.build_bank(bank, 36, [
+            {"sample": sample, "source": None, "loop_mode": "one_shot"},
+        ])
+
+    def test_the_sfz_carries_the_name_of_its_bank(self):
+        self.assertEqual(self._build("Drumkit A")["file"], "Drumkit_A.sfz")
+        self.assertEqual(self._build("Foley")["file"], "Foley.sfz")
+
+    def test_two_banks_do_not_share_a_filename(self):
+        first = self._build("Drumkit A")["file"]
+        second = self._build("Foley")["file"]
+        self.assertNotEqual(first, second)
+
+    def test_a_build_removes_an_sfz_it_did_not_write(self):
+        path = sfzbuilder.create_bank("Kit")
+        with open(os.path.join(path, "OldName.sfz"), "w") as fh:
+            fh.write("<region> key=36 sample=gone.wav\n")
+        self._build("Kit")
+        self.assertEqual(sorted(sfzbuilder.find_sfz_files(path)), ["Kit.sfz"])
+
+
+class TestSampleNamesWithSpaces(unittest.TestCase):
+    # A file that reached the bank by any road but this panel's own upload --
+    # the file manager, scp, an unzip -- keeps its name, and could not be saved
+    # while build_bank ran that name through sanitize_filename a second time.
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self._real = sfzbuilder.USER_FILES_DIR
+        sfzbuilder.USER_FILES_DIR = self.tmp
+
+    def tearDown(self):
+        sfzbuilder.USER_FILES_DIR = self._real
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_a_sample_with_a_space_can_be_saved(self):
+        path = sfzbuilder.create_bank("Kit")
+        make_wav(os.path.join(path, "My Kick.wav"))
+        listed = [os.path.basename(f) for f in sfzbuilder.list_bank_samples("Kit")]
+        self.assertEqual(listed, ["My Kick.wav"])
+
+        result = sfzbuilder.build_bank("Kit", 36, [
+            {"sample": "My Kick.wav", "source": None, "loop_mode": "one_shot"},
+        ])
+        self.assertEqual(result["count"], 1)
+        with open(os.path.join(path, "Kit.sfz")) as fh:
+            self.assertIn("sample=My Kick.wav", fh.read())
+
+    def test_the_name_is_last_so_the_space_reads_whole(self):
+        # Everything after "sample=" to the end of the line is the name.
+        text = sfzbuilder.generate_sfz([
+            {"key": 36, "sample": "My Kick.wav", "volume": -6,
+             "pitch_keycenter": 60, "loop_mode": "one_shot"},
+        ])
+        self.assertTrue(text.rstrip("\n").endswith("sample=My Kick.wav"))
+
+    def test_a_name_that_holds_a_path_is_refused(self):
+        path = sfzbuilder.create_bank("Kit")
+        make_wav(os.path.join(path, "kick.wav"))
+        with self.assertRaises(ValueError):
+            sfzbuilder.build_bank("Kit", 36, [
+                {"sample": "../../kick.wav", "source": None, "loop_mode": "one_shot"},
+            ])
+
+
+class TestRenameAndDelete(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self._real = sfzbuilder.USER_FILES_DIR
+        sfzbuilder.USER_FILES_DIR = self.tmp
+
+    def tearDown(self):
+        sfzbuilder.USER_FILES_DIR = self._real
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _build(self, bank, sample="kick.wav"):
+        path = sfzbuilder.create_bank(bank)
+        make_wav(os.path.join(path, sample))
+        sfzbuilder.build_bank(bank, 36, [
+            {"sample": sample, "source": None, "loop_mode": "one_shot"},
+        ])
+        return path
+
+    def test_rename_moves_the_directory(self):
+        self._build("Kit")
+        self.assertEqual(sfzbuilder.rename_bank("Kit", "Drumkit A"), "Drumkit_A")
+        self.assertEqual(sfzbuilder.list_banks(), ["Drumkit_A"])
+
+    def test_rename_renames_the_sfz_with_it(self):
+        # A plugin's file selector shows the basename, so an .sfz left under
+        # the old name would keep showing the old name until the next build.
+        self._build("Kit")
+        sfzbuilder.rename_bank("Kit", "Drumkit A")
+        path = sfzbuilder.bank_dir("Drumkit A")
+        self.assertEqual(sfzbuilder.find_sfz_files(path), ["Drumkit_A.sfz"])
+
+    def test_rename_keeps_the_samples_and_the_layout(self):
+        self._build("Kit")
+        sfzbuilder.rename_bank("Kit", "Foley")
+        state = sfzbuilder.load_bank("Foley")
+        self.assertEqual(state["base_note"], 36)
+        self.assertEqual(state["slots"][0]["sample"], "kick.wav")
+        listed = [os.path.basename(f) for f in sfzbuilder.list_bank_samples("Foley")]
+        self.assertEqual(listed, ["kick.wav"])
+
+    def test_rename_onto_an_existing_bank_is_refused(self):
+        self._build("Kit")
+        self._build("Foley")
+        with self.assertRaises(ValueError):
+            sfzbuilder.rename_bank("Kit", "Foley")
+        self.assertEqual(sfzbuilder.list_banks(), ["Foley", "Kit"])
+
+    def test_rename_to_the_same_name_is_not_an_error(self):
+        # "Kit A" and "Kit_A" sanitize to the same directory, so this is the
+        # path a rename that only changes a space takes.
+        self._build("Kit_A")
+        self.assertEqual(sfzbuilder.rename_bank("Kit_A", "Kit A"), "Kit_A")
+        self.assertEqual(sfzbuilder.list_banks(), ["Kit_A"])
+
+    def test_rename_of_a_bank_that_is_not_there(self):
+        with self.assertRaises(ValueError):
+            sfzbuilder.rename_bank("Gone", "Kit")
+
+    def test_rename_to_an_empty_name_is_refused(self):
+        self._build("Kit")
+        with self.assertRaises(ValueError):
+            sfzbuilder.rename_bank("Kit", "...")
+        self.assertEqual(sfzbuilder.list_banks(), ["Kit"])
+
+    def test_delete_removes_the_bank(self):
+        self._build("Kit")
+        self._build("Foley")
+        self.assertEqual(sfzbuilder.delete_bank("Kit"), "Kit")
+        self.assertEqual(sfzbuilder.list_banks(), ["Foley"])
+
+    def test_delete_of_a_bank_that_is_not_there(self):
+        with self.assertRaises(ValueError):
+            sfzbuilder.delete_bank("Gone")
+
+    def test_delete_does_not_follow_a_link_out_of_the_root(self):
+        # rmtree on a name that resolves outside the instruments directory
+        # would take the target with it.
+        outside = os.path.join(self.tmp, "keep")
+        make_wav(os.path.join(outside, "precious.wav"))
+        root = sfzbuilder.sfz_instruments_dir()
+        os.makedirs(root, exist_ok=True)
+        os.symlink(outside, os.path.join(root, "Escape"))
+        with self.assertRaises(ValueError):
+            sfzbuilder.delete_bank("Escape")
+        self.assertTrue(os.path.isfile(os.path.join(outside, "precious.wav")))

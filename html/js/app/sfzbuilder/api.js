@@ -60,6 +60,42 @@ export function createBank(name) {
 }
 
 /**
+ * Changes the name of a bank.
+ *
+ * The server moves the directory and renames the SFZ file inside it, because
+ * that file carries the name of its bank. The name it gives back is the one
+ * that reached the disk, which is not always the one that was asked for: a
+ * space becomes an underscore.
+ * @param {string} name
+ * @param {string} newName
+ * @returns {Promise<any>}
+ */
+export function renameBank(name, newName) {
+    return Promise.resolve(jq().ajax({
+        url: '/sfzbuilder/bank/rename',
+        type: 'POST',
+        data: JSON.stringify({ name: name, new_name: newName }),
+        dataType: 'json',
+        cache: false,
+    }))
+}
+
+/**
+ * Removes a bank and everything in it.
+ * @param {string} name
+ * @returns {Promise<any>}
+ */
+export function deleteBank(name) {
+    return Promise.resolve(jq().ajax({
+        url: '/sfzbuilder/bank/delete',
+        type: 'POST',
+        data: JSON.stringify({ name: name }),
+        dataType: 'json',
+        cache: false,
+    }))
+}
+
+/**
  * Gives the audio files of one sample source.
  * @param {string} source One of "bank", "device" or "usb".
  * @param {string} bank The name of the current bank.

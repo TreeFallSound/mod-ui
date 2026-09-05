@@ -51,6 +51,16 @@ function accentRgb() {
   probe.parentNode.removeChild(probe);
   return colour;
 }
+// The same idea for a font token. main.less holds
+// `* { font-family: "cooper hewitt", Sans-serif !important }`, which lands on
+// every element of the panel one by one and beats a plain declaration, so the
+// panel drew in the page font and read nothing from --sfz-mono at all.
+function tokenValue(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+function firstFamily(value) {
+  return (value.split(',')[0] || '').trim().replace(/^["']|["']$/g, '').toLowerCase();
+}
 function accentRgba(alpha) {
   var parts = accentRgb().match(/\d+/g) || [];
   return 'rgba(' + parts.slice(0, 3).join(', ') + ', ' + alpha + ')';
@@ -66,6 +76,12 @@ $.ajax = function (o) {
   setTimeout(function () {
     if (u.indexOf('/sfzbuilder/banks') === 0) {
       d.resolve({ ok: true, banks: ['Drumkit A', 'Foley'], counts: { 'Drumkit A': 6, 'Foley': 12 } });
+    } else if (u.indexOf('/sfzbuilder/bank/rename') === 0) {
+      // The server gives back the name that reached the disk, not the one it
+      // was sent: a space becomes an underscore.
+      d.resolve({ ok: true, name: JSON.parse(o.data).new_name.replace(/ /g, '_') });
+    } else if (u.indexOf('/sfzbuilder/bank/delete') === 0) {
+      d.resolve({ ok: true, name: JSON.parse(o.data).name });
     } else if (u.indexOf('/sfzbuilder/bank') === 0) {
       d.resolve({ ok: true, base_note: 36, slots: [] });
     } else if (u.indexOf('/sfzbuilder/samples') === 0) {
@@ -217,6 +233,31 @@ setTimeout(function () {
           setNote(36);
         }
 
+        // The panel draws in its own font. The title is checked because that
+        // is where the wrong font showed first, and .sfz-lbl because a nested
+        // element is what the `*` rule of main.less reaches: the panel had the
+        // right family on itself and the page font on everything inside it.
+        var wantMono = firstFamily(tokenValue('--sfz-mono'));
+        var titleFamily = firstFamily(getComputedStyle(root.querySelector('.sfz-title')).fontFamily);
+        var lblFamily = firstFamily(getComputedStyle(root.querySelector('.sfz-lbl')).fontFamily);
+        check('the title draws in the font of the panel', titleFamily === wantMono,
+              titleFamily + ' vs ' + wantMono);
+        check('an element inside the panel draws in the font of the panel',
+              lblFamily === wantMono, lblFamily + ' vs ' + wantMono);
+
+        // The head holds no empty row. The tool row is hidden while no bank is
+        // open, so the space under the title row has to come from a gap, which
+        // is drawn between two visible rows, and never from a margin, which is
+        // drawn whether or not a row follows.
+        var headStyle = getComputedStyle(root.querySelector('.sfz-head'));
+        var topStyle = getComputedStyle(root.querySelector('.sfz-head-top'));
+        check('the head spaces its rows with a gap', headStyle.display === 'flex' &&
+              parseFloat(headStyle.rowGap) > 0, headStyle.display + ' gap=' + headStyle.rowGap);
+        check('the title row carries no margin under it',
+              parseFloat(topStyle.marginBottom) === 0, topStyle.marginBottom);
+        check('the status sits on the title row, which is never hidden',
+              root.querySelector('.sfz-head-top > .sfz-status') !== null);
+
         // The focus ring. main.less has `* { outline: 0 !important }`, so the
         // panel has to put a ring back with a rule of its own. These checks say
         // that it does, and that each control the mouse can reach the keyboard
@@ -225,6 +266,8 @@ setTimeout(function () {
         var reach = [
           ['the new bank button', '.sfz-add'],
           ['the save button', '.sfz-save'],
+          ['the rename button', '.sfz-btn--quiet'],
+          ['the delete button', '.sfz-btn--danger'],
           ['a source button', '.sfz-seg button'],
           ['the upload control', '.sfz-upload input'],
           ['the filter box', '.sfz-search'],
@@ -400,10 +443,64 @@ setTimeout(function () {
               swallowed.length === 0,
               swallowed.join(', ') || roled.length + ' roles checked');
 
-        var panel = root.querySelector('.sfz-panel');
-        note('panel columns:', getComputedStyle(panel).gridTemplateColumns);
-        note('colour scheme:', getComputedStyle(root).colorScheme);
-        finish();
+        // Rename and delete. The confirm box is answered by the stub below,
+        // because a headless browser answers it with false and the delete
+        // would never run.
+        var bankNames = function () {
+          return [].map.call(root.querySelectorAll('.sfz-bank-name'), function (n) {
+            return n.textContent;
+          });
+        };
+        check('the panel lists the banks it was given',
+              bankNames().join() === 'Drumkit A,Foley', bankNames().join());
+
+        var renameButton = root.querySelector('.sfz-btn--quiet');
+        renameButton.click();
+        var titleEdit = root.querySelector('.sfz-title-edit');
+        check('rename opens a field where the title is', !!titleEdit);
+        if (titleEdit) {
+          check('the field starts at the name of the bank',
+                titleEdit.value === 'Drumkit A', titleEdit.value);
+          check('the title steps aside while the field is open',
+                root.querySelector('.sfz-title').hidden);
+          check('the field has the focus', document.activeElement === titleEdit);
+
+          // Escape gives the name back and the focus with it.
+          titleEdit.value = 'Something else';
+          titleEdit.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+          check('escape puts the title back', !root.querySelector('.sfz-title-edit') &&
+                root.querySelector('.sfz-title').textContent === 'Drumkit A' &&
+                !root.querySelector('.sfz-title').hidden);
+          check('escape gives the focus back to the button',
+                document.activeElement === renameButton);
+        }
+
+        renameButton.click();
+        var edit2 = root.querySelector('.sfz-title-edit');
+        edit2.value = 'Kit A';
+        edit2.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        setTimeout(function () {
+          // The panel opens the name the server gives back, not the one it
+          // sent: "Kit A" reached the disk as "Kit_A".
+          check('a rename opens the name the server gives back',
+                root.querySelector('.sfz-title').textContent === 'Kit_A',
+                root.querySelector('.sfz-title').textContent);
+
+          var realConfirm = window.confirm;
+          var asked = '';
+          window.confirm = function (message) { asked = message; return false; };
+          root.querySelector('.sfz-btn--danger').click();
+          check('delete asks before it removes anything',
+                asked.indexOf('cannot be undone') > 0, JSON.stringify(asked));
+          check('a refused confirm removes nothing',
+                root.querySelector('.sfz-title').textContent === 'Kit_A');
+          window.confirm = realConfirm;
+
+          var panel = root.querySelector('.sfz-panel');
+          note('panel columns:', getComputedStyle(panel).gridTemplateColumns);
+          note('colour scheme:', getComputedStyle(root).colorScheme);
+          finish();
+        }, 200);
       }, 200);
     }, 400);
   }, 700);
