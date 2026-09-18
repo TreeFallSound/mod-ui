@@ -111,6 +111,11 @@ setup(name = 'mod',
                     (('share/mod/html/img/social'), glob('html/img/social/*.png')),
                     (('share/mod/html/include'), glob('html/include/*.html')),
                     (('share/mod/html/js'), glob('html/js/*.js')),
+                    # pi-Stomp: the SFZ builder island. Each island keeps its
+                    # code and its stylesheet in one directory, so a new island
+                    # needs two lines here. The globs below are not recursive.
+                    (('share/mod/html/js/app/sfzbuilder'), glob('html/js/app/sfzbuilder/*.js')),
+                    (('share/mod/html/js/app/sfzbuilder'), glob('html/js/app/sfzbuilder/*.css')),
                     (('share/mod/html/js/utils'), glob('html/js/utils/*.js')),
                     (('share/mod/html/js/lib'), glob('html/js/lib/*.js')),
                     (('share/mod/html/js/lib/slick'), glob('html/js/lib/slick/*.js')),

@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [ ps-1.13, feat/** ]
+  pull_request:
+
+# Every step below calls a Makefile target. No test file is named here or in the
+# Makefile: `unittest discover` finds test/test_*.py and `node --test` finds
+# test/js/**/*.test.js. A new test runs without a change to either file.
+# `make test` runs all of it at once and is what you run before you push.
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Check that the server files parse
+        run: make compile
+      - name: Run the Python tests
+        run: make test-py
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run the JavaScript tests
+        run: make test-js
+      - name: Check the JSDoc types
+        run: make typecheck

@@ -50,6 +50,12 @@ from mod import (
     get_hardware_descriptor, get_unique_name, symbolify,
 )
 from mod.bank import list_banks, save_banks, remove_pedalboard_from_banks
+from mod.sfzbuilder import (
+    AUDIO_EXTENSIONS, SIDECAR_NAME,
+    sanitize_filename, unique_filename, list_banks as sfz_list_banks,
+    list_bank_samples, list_device_samples, list_usb_samples, create_bank, build_bank,
+    load_bank, rename_bank, delete_bank,
+)
 from mod.session import SESSION
 from modtools.utils import (
     kPedalboardInfoUserOnly, kPedalboardInfoFactoryOnly, kPedalboardInfoBoth,
@@ -272,6 +278,29 @@ class TimelessStaticFileHandler(web.StaticFileHandler):
 
     def get_modified_time(self):
         return None
+
+class IslandStaticFileHandler(web.StaticFileHandler):
+    """
+    Serves html/js/app/, the directory of the islands.
+
+    index.html gives each of its own files a "?v=" query and the server gives
+    every static file a cache of one year. An island is different: it loads its
+    files with import() and with a <link> that it makes itself, so those files
+    carry no query. With a cache of one year the browser keeps an old file --
+    or keeps a 404 from a build before the file was there -- and the panel is
+    then empty and gives no other sign.
+
+    This handler asks the browser to check each time. The server answers 304 if
+    the file did not change, so the cost is one small request for each file.
+    """
+    def compute_etag(self):
+        # The default ETag of Tornado. The browser sends it back and the server
+        # answers 304 when the file is the same.
+        return web.StaticFileHandler.compute_etag(self)
+
+    def set_extra_headers(self, path):
+        # set_extra_headers runs after set_headers, so this value stays.
+        self.set_header("Cache-Control", "no-cache")
 
 class JsonRequestHandler(TimelessRequestHandler):
     def write(self, data):
@@ -2300,14 +2329,185 @@ class TokensSave(JsonRequestHandler):
 
         self.write(True)
 
+def _audio_file_size(path):
+    # A file can go away between the walk and this call. The panel then shows
+    # no size, which is not an error.
+    try:
+        return os.path.getsize(path)
+    except OSError:
+        return None
+
+def _audio_file_entries(files):
+    return [
+        {'fullname': f, 'basename': os.path.basename(f), 'size': _audio_file_size(f)}
+        for f in files
+    ]
+
+class SfzBuilderBanks(JsonRequestHandler):
+    def get(self):
+        banks = sfz_list_banks()
+        # The bank list shows how many samples each bank holds. The count comes
+        # from the same walk that the sample list uses.
+        counts = {}
+        for name in banks:
+            try:
+                counts[name] = len(list_bank_samples(name))
+            except (ValueError, OSError):
+                pass
+        self.write({'ok': True, 'banks': banks, 'counts': counts})
+
+class SfzBuilderBank(JsonRequestHandler):
+    def get(self):
+        try:
+            state = load_bank(self.get_argument('name', ''))
+        except ValueError as e:
+            self.write({'ok': False, 'error': str(e)})
+            return
+        state['ok'] = True
+        self.write(state)
+
+    @jsoncall
+    def post(self):
+        try:
+            path = create_bank(self.request.body.get('name'))
+        except ValueError as e:
+            self.write({'ok': False, 'error': str(e)})
+            return
+        self.write({'ok': True, 'name': os.path.basename(path)})
+
+class SfzBuilderBankRename(JsonRequestHandler):
+    @jsoncall
+    def post(self):
+        body = self.request.body
+        try:
+            name = rename_bank(body.get('name'), body.get('new_name'))
+        except (ValueError, OSError) as e:
+            self.write({'ok': False, 'error': str(e)})
+            return
+        self.write({'ok': True, 'name': name})
+
+class SfzBuilderBankDelete(JsonRequestHandler):
+    @jsoncall
+    def post(self):
+        try:
+            name = delete_bank(self.request.body.get('name'))
+        except (ValueError, OSError) as e:
+            self.write({'ok': False, 'error': str(e)})
+            return
+        self.write({'ok': True, 'name': name})
+
+class SfzBuilderSamples(JsonRequestHandler):
+    def get(self):
+        try:
+            files = list_bank_samples(self.get_argument('bank', ''))
+        except ValueError as e:
+            self.write({'ok': False, 'error': str(e)})
+            return
+        self.write({'ok': True, 'files': _audio_file_entries(files)})
+
+class SfzBuilderDevice(JsonRequestHandler):
+    def get(self):
+        try:
+            files = list_device_samples(self.get_argument('exclude_bank', None))
+        except ValueError as e:
+            self.write({'ok': False, 'error': str(e)})
+            return
+        self.write({'ok': True, 'files': _audio_file_entries(files)})
+
+class SfzBuilderUsb(JsonRequestHandler):
+    def get(self):
+        self.write({'ok': True, 'files': _audio_file_entries(list_usb_samples())})
+
+# The most one upload may carry, for each file and for the batch together.
+#
+# The number is under Tornado's own max_buffer_size, which is 100 MB and which
+# this application does not change. That limit is the real ceiling: Tornado
+# holds the whole request body in memory and drops the connection when the body
+# goes past it, which reaches the panel as a failed request and no reason. The
+# cap below is hit first, so the panel can say what happened instead.
+MAX_UPLOAD_BYTES = 64 * 1024 * 1024
+
+class SfzBuilderUpload(JsonRequestHandler):
+    def post(self):
+        try:
+            path = create_bank(self.get_argument('bank', ''))
+        except ValueError as e:
+            self.write({'ok': False, 'error': str(e)})
+            return
+
+        # Every file is checked before any file is written. The first version
+        # wrote as it went and returned on the first name that was not audio,
+        # which left the files before it in the bank and told the panel the
+        # upload had failed. A batch now lands whole or not at all.
+        entries = []
+        total = 0
+        for upload in self.request.files.values():
+            for entry in upload:
+                filename = sanitize_filename(entry['filename'])
+                if not filename.lower().endswith(AUDIO_EXTENSIONS):
+                    self.write({'ok': False, 'error': 'not an audio file: %s' % entry['filename']})
+                    return
+                if len(entry['body']) > MAX_UPLOAD_BYTES:
+                    self.write({'ok': False, 'error': '%s is larger than %d MB'
+                                % (entry['filename'], MAX_UPLOAD_BYTES // (1024 * 1024))})
+                    return
+                total += len(entry['body'])
+                if total > MAX_UPLOAD_BYTES:
+                    self.write({'ok': False, 'error': 'that upload is larger than %d MB'
+                                % (MAX_UPLOAD_BYTES // (1024 * 1024))})
+                    return
+                entries.append((filename, entry['body']))
+
+        used = set(os.listdir(path))
+        saved = []
+        for filename, body in entries:
+            filename = unique_filename(filename, used)
+            with open(os.path.join(path, filename), 'wb') as fh:
+                fh.write(body)
+            used.add(filename)
+            saved.append(filename)
+
+        self.write({'ok': True, 'files': saved})
+
+class SfzBuilderBuild(JsonRequestHandler):
+    @jsoncall
+    def post(self):
+        body = self.request.body
+        try:
+            result = build_bank(body.get('name'), body.get('base_note', 36), body.get('slots', []))
+        except ValueError as e:
+            self.write({'ok': False, 'error': str(e)})
+            return
+        self.write(result)
+
+class SfzBuilderAudio(web.StaticFileHandler):
+    def initialize(self):
+        web.StaticFileHandler.initialize(self, path='/')
+
+    @classmethod
+    def get_absolute_path(cls, root, path):
+        return path
+
+    # Tornado calls this with (root, absolute_path). The root is unused here,
+    # because get_absolute_path() above passes the full path straight through.
+    def validate_absolute_path(self, root, absolute_path):
+        absolute_path = os.path.realpath(absolute_path)
+
+        allowed = (os.path.realpath(USER_FILES_DIR), os.path.realpath('/media'))
+        if not any(absolute_path.startswith(base + os.sep) for base in allowed):
+            raise web.HTTPError(403, 'Access denied')
+
+        # This endpoint previews samples. It must not serve any other file.
+        if not absolute_path.lower().endswith(AUDIO_EXTENSIONS):
+            raise web.HTTPError(403, 'Not an audio file')
+
+        if not os.path.isfile(absolute_path):
+            raise web.HTTPError(404)
+
+        return absolute_path
+
 class FilesList(JsonRequestHandler):
-    complete_audiofile_exts = (
-        # through libsndfile
-        ".aif", ".aifc", ".aiff", ".au", ".bwf", ".flac", ".htk", ".iff", ".mat4", ".mat5", ".oga", ".ogg", ".opus",
-        ".paf", ".pvf", ".pvf5", ".sd2", ".sf", ".snd", ".svx", ".vcc", ".w64", ".wav", ".xi",
-        # extra through ffmpeg
-        ".3g2", ".3gp", ".aac", ".ac3", ".amr", ".ape", ".mp2", ".mp3", ".mpc", ".wma",
-    )
+    complete_audiofile_exts = AUDIO_EXTENSIONS
 
     hq_audiofile_exts = (
         ".aif", ".aifc", ".aiff", ".flac", ".w64", ".wav",
@@ -2492,6 +2692,18 @@ application = web.Application(
             # file listing etc
             (r"/files/list/?", FilesList),
 
+            # sfz sound-bank builder
+            (r"/sfzbuilder/banks/?", SfzBuilderBanks),
+            (r"/sfzbuilder/bank/?", SfzBuilderBank),
+            (r"/sfzbuilder/bank/rename/?", SfzBuilderBankRename),
+            (r"/sfzbuilder/bank/delete/?", SfzBuilderBankDelete),
+            (r"/sfzbuilder/samples/?", SfzBuilderSamples),
+            (r"/sfzbuilder/device/?", SfzBuilderDevice),
+            (r"/sfzbuilder/usb/?", SfzBuilderUsb),
+            (r"/sfzbuilder/upload/?", SfzBuilderUpload),
+            (r"/sfzbuilder/audio/(.*)", SfzBuilderAudio),
+            (r"/sfzbuilder/build/?", SfzBuilderBuild),
+
             (r"/reset/?", DashboardClean),
 
             (r"/sdk/install/?", SDKEffectInstaller),
@@ -2521,6 +2733,9 @@ application = web.Application(
             (r"/([a-z]+\.html)$", TemplateHandler),
             (r"/(allguis|sdk|settings)$", TemplateHandler),
             (r"/load_template/([a-z_]+\.html)$", TemplateLoader),
+            # This route must come before the catch-all below. The islands
+            # need a different cache policy. See IslandStaticFileHandler.
+            (r"/js/app/(.*)", IslandStaticFileHandler, {"path": os.path.join(HTML_DIR, "js", "app")}),
             (r"/js/templates.js$", BulkTemplateLoader),
 
             (r"/websocket/?$", ServerWebSocket),

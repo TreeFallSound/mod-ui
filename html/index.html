@@ -146,6 +146,8 @@ $('document').ready(function() {
         bankList: $('#bank-list'),
         fileManagerBox: $('#file-manager-library'),
         fileManagerBoxTrigger: $('#main-menu #mod-file-manager'),
+        sfzBuilderBox: $('#sfzbuilder-library'),
+        sfzBuilderBoxTrigger: $('#main-menu #mod-sfzbuilder'),
         shareButton: $('#pedalboard-info .js-cloud'),
         shareWindow: $('#share-window'),
         presetSaveBox: $('#save-preset'),
@@ -371,6 +373,7 @@ $('document').ready(function() {
 <script type="text/javascript" src="js/pedalboards.js?v={{version}}"></script>
 <script type="text/javascript" src="js/file_manager.js?v={{version}}"></script>
 <script type="text/javascript" src="js/banks.js?v={{version}}"></script>
+<script type="text/javascript" src="js/sfzbuilder.js?v={{version}}"></script>
 <script type="text/javascript" src="js/effects.js?v={{version}}"></script>
 <script type="text/javascript" src="js/cloudplugin.js?v={{version}}"></script>
 <script type="text/javascript" src="js/patchstorage.js?v={{version}}"></script>
@@ -730,6 +733,7 @@ $('document').ready(function() {
         <div id="mod-pedalboard" class="icon" data-message="Pedalboards Library"></div>
         <div id="mod-bank" class="icon" data-message="Banks"></div>
         <div id="mod-file-manager" class="icon" data-message="File Manager"></div>
+        <div id="mod-sfzbuilder" class="icon" data-message="Sound Bank Builder"></div>
         <div id="mod-cloud-plugins" class="icon" data-message="Plugin Store"></div>
         <div id="patchstorage" class="icon" data-message="Patchstorage"></div>
         <div id="banks-saving">Auto saving banks...</div>
@@ -1116,6 +1120,13 @@ $('document').ready(function() {
         </div>
     </div></div>
     <!-- END FILE MANAGER -->
+
+    <!-- SFZ SOUND BANK BUILDER -->
+    <!-- The container is empty. html/js/app/sfzbuilder/ makes every element,
+         holds its own stylesheet and knows its own endpoints. See
+         docs/frontend-architecture.md, rule 4.3. -->
+    <div id="sfzbuilder-library" class="mod-hidden mod-init-hidden"></div>
+    <!-- END SFZ SOUND BANK BUILDER -->
 
     <!-- MOD UPDATE/UPGRADE TOOLTIP -->
     <div class="tooltip mod-hidden" style="right:102px;">
