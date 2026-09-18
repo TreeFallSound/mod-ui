@@ -49,6 +49,7 @@
             </div>
             <!-- END PRESET LIST -->
 
+            <!-- FILE SELECTORS always at top -->
             {{#effect.parameters}}
             {{#writable}}
             {{#path}}
@@ -64,6 +65,12 @@
                 </div>
             </div>
             {{/path}}
+            {{/writable}}
+            {{/effect.parameters}}
+            <!-- END FILE SELECTORS -->
+
+            {{#effect.parameters}}
+            {{#writable}}
             {{#string}}
             <div class="mod-string">
                 <span class="mod-string-title">{{label}}</span>
