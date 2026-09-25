@@ -239,7 +239,7 @@ class Session(object):
     # We need to cache its socket address and send any msg callbacks to it
     def websocket_opened(self, ws, callback):
         # Pi-stomp connects from localhost; browsers come from LAN IPs.
-        # Local clients don't need real-time audio meters or data_ready flow control.
+        # Local clients are exempt from data_ready flow control (see msg_callback).
         if ws.request.remote_ip in ('127.0.0.1', '::1'):
             ws._is_local = True
 
@@ -419,7 +419,15 @@ class Session(object):
         any_non_local_received = False
         for ws in self.websockets:
             if getattr(ws, '_is_local', False):
-                if is_output_set or is_data_ready:
+                # output_set does reach local clients: pi-stomp renders plugin
+                # state (loopjefe's looper state drives its footswitch LED and
+                # LCD slot) from it, and drops the ports it hasn't subscribed
+                # to. Measured cost of a live meter is ~30 msg/s, not the
+                # per-cycle rate -- plugins update monitored outputs at about
+                # UI refresh and mod-host discards the rest.
+                # data_ready stays suppressed: acking it would put pi-stomp's
+                # 10ms loop inside mod-host's feedback path.
+                if is_data_ready:
                     continue
             elif is_output_set:
                 if getattr(ws, '_is_background', False) or not getattr(ws, '_meter_ready', True):
