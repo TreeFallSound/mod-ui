@@ -12,10 +12,19 @@ DEV_HOST = bool(int(os.environ.get('MOD_DEV_HOST', DEV_ENVIRONMENT)))
 # If on, use dev cloud API environment
 DEV_API = bool(int(os.environ.get('MOD_DEV_API', False)))
 
-APP = bool(int(os.environ.get('MOD_APP', False)))
+DESKTOP = bool(int(os.environ.get('MOD_DESKTOP', False)))
 LOG = int(os.environ.get('MOD_LOG', 0))
 
 API_KEY = os.environ.pop('MOD_API_KEY', None)
+# Tone3000 public (vendor) API key for the image; lowest-precedence default, see webserver get_t3k_api_key.
+# A frozen MOD Desktop build has no shell environment when launched from Finder/Explorer, so
+# cx_Freeze bakes the id in as a build constant (fed from the environment at freeze time, never
+# committed). The environment still wins when set. On a device there is no BUILD_CONSTANTS.
+try:
+    from BUILD_CONSTANTS import MOD_TONE3000_CLIENT_ID as _FROZEN_TONE3000_CLIENT_ID
+except ImportError:
+    _FROZEN_TONE3000_CLIENT_ID = None
+TONE3000_CLIENT_ID = os.environ.pop('MOD_TONE3000_CLIENT_ID', None) or _FROZEN_TONE3000_CLIENT_ID
 DEVICE_KEY = os.environ.pop('MOD_DEVICE_KEY', None)
 DEVICE_TAG = os.environ.pop('MOD_DEVICE_TAG', None)
 DEVICE_UID = os.environ.pop('MOD_DEVICE_UID', None)
@@ -50,7 +59,10 @@ os.environ['MOD_KEYS_PATH'] = KEYS_PATH
 DOWNLOAD_TMP_DIR = os.environ.get('MOD_DOWNLOAD_TMP_DIR', '/tmp/mod-ui')
 PEDALBOARD_TMP_DIR = os.environ.get('MOD_PEDALBOARD_TMP_DIR', join(DATA_DIR, 'pedalboard-tmp-data'))
 
-LV2_PLUGIN_DIR = os.environ.get('LV2_PLUGIN_DIR', os.path.expanduser("~/.lv2/"))
+# pi-Stomp exports LV2_PLUGIN_DIR. MOD Desktop exports MOD_USER_PLUGINS_DIR.
+# Trailing slashes match the paths the pi-Stomp image already uses.
+LV2_PLUGIN_DIR = os.environ.get('LV2_PLUGIN_DIR',
+                 os.environ.get('MOD_USER_PLUGINS_DIR', os.path.expanduser("~/.lv2/")))
 LV2_PEDALBOARDS_DIR = os.environ.get('MOD_USER_PEDALBOARDS_DIR', os.path.expanduser("~/.pedalboards/"))
 LV2_FACTORY_PEDALBOARDS_DIR = os.environ.get('MOD_FACTORY_PEDALBOARDS_DIR', "/usr/share/mod/pedalboards/")
 
@@ -62,6 +74,7 @@ MODEL_CPU = os.environ.get('MOD_MODEL_CPU', None)
 MODEL_TYPE = os.environ.get('MOD_MODEL_TYPE', None)
 
 DEVICE_WEBSERVER_PORT = int(os.environ.get('MOD_DEVICE_WEBSERVER_PORT', 80))
+DEVICE_HOST_PORT = int(os.environ.get('MOD_DEVICE_HOST_PORT', 5555))
 
 HTML_DIR = os.environ.get('MOD_HTML_DIR', join(sys.prefix, 'share/mod/html/'))
 DEFAULT_PEDALBOARD_COPY = os.environ.pop('MOD_DEFAULT_PEDALBOARD', join(sys.prefix, 'share/mod/default.pedalboard'))
@@ -75,13 +88,22 @@ DEFAULT_ICON_IMAGE = {
 }
 
 # Cloud API addresses
-CLOUD_HTTP_ADDRESS = os.environ.pop('MOD_CLOUD_HTTP_ADDRESS', "https://api-dev.mod.audio/v2")
+CLOUD_HTTP_ADDRESS = os.environ.pop('MOD_CLOUD_HTTP_ADDRESS', "https://api.mod.audio/v2")
 CLOUD_LABS_HTTP_ADDRESS = os.environ.pop('MOD_CLOUD_LABS_HTTP_ADDRESS', "https://api-labs.mod.audio/v2")
 PLUGINS_HTTP_ADDRESS = os.environ.pop('MOD_PLUGINS_HTTP_ADDRESS', "https://pedalboards.mod.audio/plugins")
-PEDALBOARDS_HTTP_ADDRESS = os.environ.pop('MOD_PEDALBOARDS_HTTP_ADDRESS', "https://pedalboards-dev.mod.audio")
+PEDALBOARDS_HTTP_ADDRESS = os.environ.pop('MOD_PEDALBOARDS_HTTP_ADDRESS', "https://pedalboards.mod.audio")
 PEDALBOARDS_LABS_HTTP_ADDRESS = os.environ.pop('MOD_PEDALBOARDS_LABS_HTTP_ADDRESS', "https://pedalboards-labs.mod.audio")
 CONTROLCHAIN_HTTP_ADDRESS = os.environ.pop('MOD_CONTROLCHAIN_HTTP_ADDRESS',
-                                           "https://download.mod.audio/releases/cc-firmware/v2")
+                                           "https://download.mod.audio/releases/cc-firmware/v3")
+
+# "Report a problem" target. The OS build sets MOD_FEEDBACK_URL per release (the RC topic); a frozen
+# MOD Desktop build gets it baked in the same way as the Tone3000 id (its own topic, distinct from
+# the OS one). The environment wins, then the build constant, then the Beta Testing category.
+try:
+    from BUILD_CONSTANTS import MOD_FEEDBACK_URL as _FROZEN_FEEDBACK_URL
+except ImportError:
+    _FROZEN_FEEDBACK_URL = None
+FEEDBACK_URL = os.environ.get('MOD_FEEDBACK_URL') or _FROZEN_FEEDBACK_URL or "https://forum.mod.audio/c/beta-testing/41"
 
 MIDI_BEAT_CLOCK_SENDER_URI = "urn:mod:mclk"
 MIDI_BEAT_CLOCK_SENDER_INSTANCE_ID = 9993

@@ -38,6 +38,9 @@
 <link rel="stylesheet" type="text/css" href="resources/pedals/default.css?v={{version}}"/>
 <link rel="stylesheet" type="text/css" href="js/lib/slick/slick.css?v={{version}}"/>
 <link rel="stylesheet" type="text/css" href="js/lib/slick/slick-theme.css?v={{version}}"/>
+{% if desktop_app %}
+<link rel="stylesheet" type="text/css" href="css/desktop-app.css?v={{version}}"/>
+{% end %}
 
 <style type="text/css">
     /* STYLE FOR LOADING ANIMATION */
@@ -60,6 +63,25 @@
 <script type="text/javascript" src="js/lib/arrive.min.js?v={{version}}"></script>
 <script type="text/javascript" src="js/lib/lunr.min.js?v={{version}}"></script>
 <script type="text/javascript" src="js/lib/slick/slick.min.js?v={{version}}"></script>
+<script type="text/javascript" src="js/lib/crypto-js.min.js?v={{version}}"></script>
+
+<script type="module">
+  // Import ESM modules for Tone3000 client functionality
+  import { startSelectFlowPopup, exchangeCode } from './js/lib/t3k/tone3000-client.js?v={{version}}';
+
+  // make select API available to legacy javascript code
+  window.Tone3000Client = {
+    startSelectFlowPopup: startSelectFlowPopup,
+    exchangeCode: exchangeCode,
+    getTokens: function() {
+        const raw = sessionStorage.getItem('mod_t3k_tokens');
+        return raw ? JSON.parse(raw) : null;
+    },
+    setTokens: function(tokens) {
+        sessionStorage.setItem('mod_t3k_tokens', JSON.stringify(tokens));
+    }
+  }
+</script>
 
 <script type="text/javascript">
     {% autoescape None %}
@@ -88,11 +110,16 @@
     var FAVORITES = {{favorites}}
     var PREFERENCES = {{preferences}}
     var ADDRESSING_PAGES = {{addressing_pages}}
+    var T3K_API_KEY = '{{t3k_api_key}}'
     var DEBUG = true;
     if (!DEBUG) {
         console = console || {}
         console.log = function() {}
     }
+
+    var CLOUD_TERMS_ACCEPTED = PREFERENCES['cloud-terms-accepted'] === "true";
+    var USING_MOD_DESKTOP = {{using_desktop}};
+    var USING_MOD_DEVICE = {{using_mod}} && !{{using_desktop}};
 
     /*
     var INFO = {
@@ -177,20 +204,10 @@ $('document').ready(function() {
         $('#mod-bypassRight').hide()
     }
 
-    if ({{using_app}}) {
-        desktop.setupApp()
-    }
-
-    if ({{using_mod}}) {
-        desktop.authenticateDevice(function (ok) {
-            if (ok) {
-                console.log("MOD authentication succeeded")
-                desktop.resetPedalboardStats();
-            } else {
-                console.log("MOD authentication failed")
-                desktop.upgradeWindow.upgradeWindow('setErrored')
-            }
-        })
+    if (USING_MOD_DEVICE) {
+        if (CLOUD_TERMS_ACCEPTED) {
+            desktop.setupDeviceAuthentication()
+        }
     } else {
         desktop.upgradeWindow.upgradeWindow('setErrored')
 
@@ -309,6 +326,40 @@ $('document').ready(function() {
     }
     desktop.pedalboardBox.pedalboardBox('initViewMode', PREFERENCES['pb-view-mode'])
 
+    // "Report a problem": always reachable from the main screen for now. Once the
+    // update service can tell us whether the running build is published to everyone
+    // (group 0), this button is meant to stay only while the build is a release
+    // candidate, and live in Settings the rest of the time.
+    desktop.problemReport = new ProblemReport({
+        version: '{{version}}',
+        feedbackUrl: '{{feedback_url}}',
+        getPedalboard: function () {
+            var plugins = desktop.pedalboard.data('plugins') || {}
+            var uris = []
+            for (var instance in plugins) {
+                var uri = plugins[instance].data('uri')
+                if (uri) {
+                    uris.push(uri)
+                }
+            }
+            return { title: desktop.title || 'Untitled', plugins: uris }
+        },
+        getStats: function () {
+            return { xruns: cached_xruns, cpuLoad: cached_cpuLoad }
+        },
+    })
+    $('#mod-report').click(function () {
+        desktop.problemReport.open()
+    })
+
+{% if desktop_app %}
+    DesktopApp.setup(desktop)
+{% else %}
+    if (PREFERENCES['dev-mode'] == "on") {
+        enable_dev_mode(true)
+    }
+{% end %}
+
     // start code for ajax loading bar
 
     NProgress.configure({
@@ -324,6 +375,36 @@ $('document').ready(function() {
     });
 
     // end code for ajax loading bar
+
+    // start of terms handling
+
+    var terms = $('#mod-cloud-terms')
+    if (PREFERENCES['cloud-terms-accepted'] !== undefined && (USING_MOD_DEVICE || PREFERENCES['cloud-terms-accepted'] === "true")) {
+        if (CLOUD_TERMS_ACCEPTED) {
+            desktop.setupMatomo()
+            terms.hide()
+            $('#pedalboard-info').find('.js-cloud').show()
+        }
+        terms.hide()
+    } else {
+        terms.find('.js-accept').click(function () {
+            CLOUD_TERMS_ACCEPTED = true
+            desktop.saveConfigValue("cloud-terms-accepted", true)
+            desktop.setupMatomo()
+            if (USING_MOD_DEVICE) {
+                desktop.setupDeviceAuthentication()
+                $('#pedalboard-info').find('.js-cloud').show()
+            }
+            terms.hide()
+        })
+        terms.find('.js-reject').click(function () {
+            desktop.saveConfigValue("cloud-terms-accepted", false)
+            terms.hide()
+        })
+        terms.show()
+    }
+
+    // end of terms handling
 
     /*
     $.ajax({
@@ -360,7 +441,14 @@ $('document').ready(function() {
 })
 </script>
 
+{% if desktop_app %}
+{# MOD Desktop gets its own mustache partials through this shared endpoint. The
+   endpoint is cache-forever, and a Desktop build's `version` can repeat between
+   packages, so the cache key differs from any response that lacked them. #}
+<script type="text/javascript" src="js/templates.js?v={{version}}&desktop_app_templates=1"></script>
+{% else %}
 <script type="text/javascript" src="js/templates.js?v={{version}}"></script>
+{% end %}
 <script type="text/javascript" src="js/common.js?v={{version}}"></script>
 <script type="text/javascript" src="js/wait.js?v={{version}}"></script>
 <script type="text/javascript" src="js/file_transfer.js?v={{version}}"></script>
@@ -368,6 +456,12 @@ $('document').ready(function() {
 <script type="text/javascript" src="js/modgui.js?v={{version}}"></script>
 <script type="text/javascript" src="js/notification.js?v={{version}}"></script>
 <script type="text/javascript" src="js/installation.js?v={{version}}"></script>
+{% if desktop_app %}
+{# The MOD Desktop seam. A device never loads it: nothing else on this page
+   mentions DesktopApp outside a desktop_app block, and hardware.js only does
+   so behind isApp(). #}
+<script type="text/javascript" src="js/desktop-app.js?v={{version}}"></script>
+{% end %}
 <script type="text/javascript" src="js/desktop.js?v={{version}}"></script>
 <script type="text/javascript" src="js/pedalboard.js?v={{version}}"></script>
 <script type="text/javascript" src="js/pedalboards.js?v={{version}}"></script>
@@ -389,6 +483,10 @@ $('document').ready(function() {
 <script type="text/javascript" src="js/nprogress.js?v={{version}}"></script>
 <script type="text/javascript" src="js/utils/tempo.js?v={{version}}"></script>
 <script type="text/javascript" src="js/utils/plugins.js?v={{version}}"></script>
+<script type="text/javascript" src="js/report.js?v={{version}}"></script>
+
+<!-- For browsers with shields on, avoid breaking on Matomo related code -->
+<script>var _paq = { push: new Function() }</script>
 
 </head>
 <!-- END HEAD -->
@@ -440,6 +538,58 @@ $('document').ready(function() {
 <!-- NOTIFICATIONS -->
 <div id="notifications" class="mod-hidden mod-init-hidden"></div>
 <!-- END NOTIFICATIONS -->
+
+{% if using_desktop == 'true' or using_mod == 'true' %}
+<!-- CLOUD-TERMS-WINDOW -->
+<div id="mod-cloud-terms" class="save-popup mod-hidden">
+    <div class="mod-box">
+        {% if using_desktop == 'true' %}
+        <h1>Welcome to MOD Desktop!</h1>
+        <div>
+            <p>
+                We're thrilled to have you on board and can't wait for you to explore all the amazing features we've built for you.
+                Before you dive in, there's just a little bit of housekeeping to take care of.<br/>
+                By using this application you're agreeing to our
+                <a href="/desktop-tou.html" target="_blank">Terms of Use</a>
+                and
+                <a href="/desktop-pp.html" target="_blank">Privacy Policy</a>.
+                They outline how we work together, use your data, and protect your privacy – ensuring a safe and enjoyable experience for everyone.<br/>
+                So, take a quick moment to review these documents.
+                Once you're all set, the world of MOD is yours to explore.
+                Happy modding!<br/>
+            </p>
+        </div>
+        {% else %}
+        <h1 class="pull-left">Terms of Use for MOD online components</h1>
+        <span class="js-reject close">&times;</span>
+        <div class="bottom">
+            <div class="clearfix"></div>
+            <p>
+                (NOTE: THIS AN EXAMPLE TEXT YET TO BE REVIEWED)<br/>
+                Your MOD unit can receive firmware updates over the internet, and also download new plugins and pedalboards.<br/>
+                The use of these online services is under Terms of Use and Privacy Policy in order to comply with different regulatory laws across the globe.<br/>
+            </p>
+            <p>
+                Please review our
+                <a href="/desktop-tou.html" target="_blank">Terms of Use</a>
+                and
+                <a href="/desktop-pp.html" target="_blank">Privacy Policy</a> before continuing.<br/>
+                While you can freely use your MOD unit without accepting these terms, you must agree to them in order to enable or perform any online interaction.
+            </p>
+        </div>
+        {% end %}
+        <div class="controls actions">
+            {% if using_desktop == 'true' %}
+            <button class="js-accept btn btn-success">Agree and Continue</button>
+            {% else %}
+            <button class="js-reject btn btn-danger">Disagree</button>
+            <button class="js-accept btn btn-success">Agree</button>
+            {% end %}
+        </div>
+    </div>
+</div>
+<!-- END CLOUD-TERMS-WINDOW -->
+{% end %}
 
 <!-- WRAPPER -->
 <div id="wrapper" class="mod-init-hidden">
@@ -617,7 +767,7 @@ $('document').ready(function() {
                     <button class="js-reset">New Pedalboard</button>
                     <button class="js-save">Save</button>
                     <button class="js-save-as">Save as</button>
-                    <button class="js-cloud">Share</button>
+                    <button class="js-cloud mod-hidden">Share</button>
                 </div>
             </div>
             <!-- END PEDALBOARD-SETTINGS -->
@@ -742,6 +892,7 @@ $('document').ready(function() {
         <div id="mod-status" class="status icon mod-hidden"></div>
         <div id="mod-devices" class="status icon"></div>
         <div id="mod-settings" class="status icon mod-settings" data-message="Go to settings screen"></div>
+        <div id="mod-report" class="icon" title="Report a problem with this release">Report a problem</div>
         <div id="mod-ram" class="icon">
             <div class="progress" id="ram-bar" style="width: 100%;">
                 <div class="bar"></div> <!-- not sure if this is needed -->

@@ -5,12 +5,16 @@
 import json
 import logging
 import os
+import platform
 import re
 import shutil
 import subprocess
+import threading
 import sys
 import time
 import tarfile
+import urllib.parse
+import unicodedata
 
 try:
     sys.modules['tornado'] = __import__('tornado')
@@ -20,7 +24,6 @@ except ModuleNotFoundError:
 from base64 import b64decode, b64encode
 from datetime import timedelta
 from random import randint
-from signal import signal, SIGUSR1, SIGUSR2
 from tornado import gen, iostream, web, websocket
 from tornado.escape import squeeze, url_escape, xhtml_escape
 from tornado.ioloop import IOLoop
@@ -29,25 +32,33 @@ from tornado.util import unicode_type
 from uuid import uuid4
 import urllib.request
 
+try:
+    from signal import signal, SIGUSR1, SIGUSR2
+    haveSignal = True
+except ImportError:
+    haveSignal = False
+
+from mod import hostinfo
 from mod.profile import Profile
-from mod.settings import (APP, LOG, DEV_API,
+from mod.settings import (DESKTOP, LOG, DEV_API,
                           HTML_DIR, DOWNLOAD_TMP_DIR, DEVICE_KEY, DEVICE_WEBSERVER_PORT,
                           CLOUD_HTTP_ADDRESS, CLOUD_LABS_HTTP_ADDRESS,
                           PLUGINS_HTTP_ADDRESS, PEDALBOARDS_HTTP_ADDRESS, CONTROLCHAIN_HTTP_ADDRESS,
                           USER_BANKS_JSON_FILE,
                           LV2_PLUGIN_DIR, LV2_PEDALBOARDS_DIR, IMAGE_VERSION,
-                          UPDATE_CC_FIRMWARE_FILE, UPDATE_MOD_OS_FILE, UPDATE_MOD_OS_HERLPER_FILE, USING_256_FRAMES_FILE,
+                          UPDATE_CC_FIRMWARE_FILE, UPDATE_MOD_OS_FILE, UPDATE_MOD_OS_HERLPER_FILE,
                           DEFAULT_ICON_TEMPLATE, DEFAULT_SETTINGS_TEMPLATE, DEFAULT_ICON_IMAGE,
                           DEFAULT_PEDALBOARD, DEFAULT_SNAPSHOT_NAME, DATA_DIR, KEYS_PATH, USER_FILES_DIR, RECORDINGS_DIR,
                           FAVORITES_JSON_FILE, PREFERENCES_JSON_FILE, USER_ID_JSON_FILE,
                           DEV_HOST, UNTITLED_PEDALBOARD_NAME, MODEL_CPU, MODEL_TYPE, PEDALBOARDS_LABS_HTTP_ADDRESS,
                           PATCHSTORAGE_ENABLED, PATCHSTORAGE_API_URL, PATCHSTORAGE_PLATFORM_ID, PATCHSTORAGE_TARGET_ID, BLOKAS_ENABLED,
-                          BLOKAS_APT_PACKAGE, BLOKAS_UPDATE_CHECK_URL)
+                          BLOKAS_APT_PACKAGE, BLOKAS_UPDATE_CHECK_URL,
+                          FEEDBACK_URL, API_KEY, TONE3000_CLIENT_ID, USING_256_FRAMES_FILE)
 
 from mod import (
-    TextFileFlusher,
+    TextFileFlusher, WINDOWS,
     check_environment, jsoncall, safe_json_load,
-    get_hardware_descriptor, get_unique_name, symbolify,
+    get_hardware_descriptor, get_unique_name, os_sync, symbolify,
 )
 from mod.bank import list_banks, save_banks, remove_pedalboard_from_banks
 from mod.sfzbuilder import (
@@ -84,6 +95,9 @@ gState.favorites = []
 
 # Cached result of get_all_plugins() / EffectList. Invalidated on plugin install or removal.
 _plugins_list_cache = None
+
+def mod_squeeze(text):
+    return squeeze(text.replace("\\", "\\\\").replace("'", "\\'"))
 
 @gen.coroutine
 def install_bundles_in_tmp_dir(options, callback):
@@ -167,24 +181,27 @@ def install_bundles_in_tmp_dir(options, callback):
             'bundles'  : bundles
         }
 
-    os.sync()
+    os_sync()
     global _plugins_list_cache
     _plugins_list_cache = None
     callback(resp)
 
 def run_command(args, cwd, callback):
+    # The command's exit is awaited on a thread and the callback posted back to the IOLoop.
+    # The previous version registered the child's stdout for epoll's HUP event (the raw
+    # mask 16): that fires on Linux only, so on macOS and Windows (MOD Desktop) the callback
+    # never ran and every request through here, plugin install included, hung for good.
     ioloop = IOLoop.instance()
     proc   = subprocess.Popen(args, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-    def end_fileno(fileno, event):
-        ret = proc.poll()
-        if ret is None:
-            return
-        ioloop.remove_handler(fileno)
+    def wait_for_exit():
+        stdout, stderr = proc.communicate()
         if callback is not None:
-            callback((ret,) + proc.communicate())
+            ioloop.add_callback(callback, (proc.returncode, stdout, stderr))
 
-    ioloop.add_handler(proc.stdout.fileno(), end_fileno, 16)
+    thread = threading.Thread(target=wait_for_exit)
+    thread.daemon = True
+    thread.start()
 
 def install_package(filename, options, callback):
     
@@ -237,7 +254,7 @@ def restart_services(restartJACK2, restartUI):
 
 @gen.coroutine
 def start_restore():
-    os.sync()
+    os_sync()
     yield gen.Task(SESSION.hmi.restore, datatype='boolean')
 
 def _reset_get_all_pedalboards_cache_with_refresh_1():
@@ -436,7 +453,8 @@ class MultiPartFileReceiver(JsonRequestHandler):
 class SystemInfo(JsonRequestHandler):
     def get(self):
         hwdesc = get_hardware_descriptor()
-        uname  = os.uname()
+        # os.uname() does not exist on Windows
+        uname  = platform.uname()
 
         if os.path.exists("/etc/mod-release/system"):
             with open("/etc/mod-release/system") as fh:
@@ -444,7 +462,25 @@ class SystemInfo(JsonRequestHandler):
         else:
             sysdate = "Unknown"
 
+        controller = "Unknown"
+        if os.path.exists("/etc/mod-release/controller"):
+            with open("/etc/mod-release/controller") as fh:
+                for line in fh:
+                    if line.startswith("revision="):
+                        controller = line[len("revision="):].strip()
+                        break
+
+        uptime = None
+        try:
+            with open("/proc/uptime") as fh:
+                uptime = int(float(fh.read().split()[0]))
+        except (IOError, OSError, ValueError, IndexError):
+            pass
+
         info = {
+            "release": IMAGE_VERSION or "Unknown",
+            "controller": controller,
+            "uptime": uptime,
             "hwname": hwdesc.get('name', "Unknown"),
             "architecture": hwdesc.get('architecture', "Unknown"),
             "cpu": MODEL_CPU or hwdesc.get('cpu', "Unknown"),
@@ -458,10 +494,19 @@ class SystemInfo(JsonRequestHandler):
             "uname": {
                 "machine": uname.machine,
                 "release": uname.release,
-                "sysname": uname.sysname,
+                "sysname": uname.system,
                 "version": uname.version
             }
         }
+
+        if DESKTOP:
+            # a computer has no hardware descriptor, release file or controller:
+            # say what it is, what it runs on and what audio setup was started
+            info["host"] = hostinfo.collect([os.path.dirname(LV2_PEDALBOARDS_DIR.rstrip('/\\')), DATA_DIR])
+            info["host"]["buffer_size"] = get_jack_buffer_size()
+            info["host"]["sample_rate"] = get_jack_sample_rate()
+            if info["host"]["uptime"] is not None:
+                info["uptime"] = info["host"]["uptime"]
 
         self.write(info)
 
@@ -477,9 +522,9 @@ class SystemPreferences(JsonRequestHandler):
         self.prefs = []
 
         self.make_pref("bluetooth_name", self.OPTION_FILE_CONTENTS, "/data/bluetooth/name", str)
+        self.make_pref("jack_buffer_size", self.OPTION_FILE_CONTENTS, "/data/jack-buffer-size", int, 128)
         self.make_pref("jack_mono_copy", self.OPTION_FILE_EXISTS, "/data/jack-mono-copy")
         self.make_pref("jack_sync_mode", self.OPTION_FILE_EXISTS, "/data/jack-sync-mode")
-        self.make_pref("jack_256_frames", self.OPTION_FILE_EXISTS, "/data/using-256-frames")
         self.make_pref("separate_spdif_outs", self.OPTION_FILE_EXISTS, "/data/separate-spdif-outs")
 
         # Optional services
@@ -593,8 +638,7 @@ class SystemExeChange(JsonRequestHandler):
             if path not in ("autorestart-hmi",
                             "jack-mono-copy",
                             "jack-sync-mode",
-                            "separate-spdif-outs",
-                            "using-256-frames"):
+                            "separate-spdif-outs"):
                 self.write(False)
                 return
 
@@ -613,7 +657,8 @@ class SystemExeChange(JsonRequestHandler):
             path    = self.get_argument('path')
             content = self.get_argument('content').strip()
 
-            if path not in ("bluetooth/name",):
+            if path not in ("bluetooth/name",
+                            "jack-buffer-size"):
                 self.write(False)
                 return
 
@@ -669,12 +714,12 @@ class SystemExeChange(JsonRequestHandler):
                 yield gen.Task(run_command, ["systemctl", "stop", servicename], None)
 
         if not finished:
-            os.sync()
+            os_sync()
             self.write(True)
 
     @gen.coroutine
     def reboot(self):
-        os.sync()
+        os_sync()
         yield gen.Task(run_command, ["reboot"], None)
 
 class SystemCleanup(JsonRequestHandler):
@@ -724,7 +769,7 @@ class SystemCleanup(JsonRequestHandler):
             yield gen.Task(run_command, ["systemctl", "stop", "jack2"], None)
 
         yield gen.Task(run_command, ["rm", "-rf"] + stuffToDelete, None)
-        os.sync()
+        os_sync()
 
         self.write({
             'ok'   : True,
@@ -746,7 +791,7 @@ class UpdateDownload(MultiPartFileReceiver):
         run_command(['mv', src, dst], None, self.move_file_finished)
 
     def move_file_finished(self, resp):
-        os.sync()
+        os_sync()
         self.result = True
         self.sfr_callback()
 
@@ -898,6 +943,27 @@ class EffectList(JsonRequestHandler):
         if _plugins_list_cache is None:
             _plugins_list_cache = get_all_plugins()
         self.write(_plugins_list_cache)
+
+class EffectT3KSelect(JsonRequestHandler):
+    """This is the select callback handler from tone3k integration"""
+    def get(self, instance):
+        code = self.get_query_argument('code', default=None)
+        state = self.get_query_argument('state', default=None)
+        tone_id = int(self.get_query_argument('tone_id', default=0))
+        canceled = bool(self.get_query_argument('canceled', default=False))
+
+        # if state != session.get('t3k_state'):
+        #     raise ValueError('State mismatch. Possible CSRF attack.')
+        logging.debug(" T3Keffect select callback: %s, code %s, state %s, tone_id %s, canceled %s", instance, code, state, tone_id, canceled)
+        if canceled:
+            # User exited without selecting a tone.
+            # If code is present, you can still exchange it for tokens.
+            # If code is absent, the user closed before signing in.
+            SESSION.host.msg_callback('t3k-cancel %s' % (instance))
+        else:
+            SESSION.host.msg_callback('t3k-tone-selected %s %s %s %s' % (instance, code, state, tone_id))
+
+        self.write('')
 
 class SDKEffectInstaller(EffectInstaller):
     def set_default_headers(self):
@@ -1305,7 +1371,7 @@ class RemotePluginWebSocket(websocket.WebSocketHandler):
         protocol, domain = match.groups()
         if protocol not in ("http", "https"):
             return False
-        if domain != "mod.audio" and not domain.endswith(".mod.audio"):
+        if domain != "localhost:8010" and domain != "mod.audio" and not domain.endswith(".mod.audio"):
             return False
         return True
 
@@ -1765,6 +1831,7 @@ class PedalboardTransportSetSyncMode(JsonRequestHandler):
 class SnapshotSave(JsonRequestHandler):
     def post(self):
         ok = SESSION.host.snapshot_save()
+        SESSION.host.save_snapshots_to_disk()
         self.write(ok)
 
 class SnapshotSaveAs(JsonRequestHandler):
@@ -1779,7 +1846,7 @@ class SnapshotSaveAs(JsonRequestHandler):
 
         # Send WebSocket message to notify clients (e.g., pistomp) of the new snapshot
         SESSION.host.msg_callback("pedal_snapshot %d %s" % (idx, title))
-
+        SESSION.host.save_snapshots_to_disk()
         self.write({
             'ok': idx is not None,
             'id': idx,
@@ -1799,6 +1866,7 @@ class SnapshotRename(JsonRequestHandler):
 
         yield gen.Task(SESSION.host.hmi_report_ss_name_if_current, idx)
 
+        SESSION.host.save_snapshots_to_disk()
         self.write({
             'ok': ok,
             'title': title,
@@ -1808,6 +1876,7 @@ class SnapshotRemove(JsonRequestHandler):
     def get(self):
         idx = int(self.get_argument('id'))
         ok  = SESSION.host.snapshot_remove(idx)
+        SESSION.host.save_snapshots_to_disk()
         self.write(ok)
 
 class SnapshotList(JsonRequestHandler):
@@ -1939,14 +2008,31 @@ class TemplateHandler(TimelessRequestHandler):
             return url_escape(version)
         return str(int(time.time()))
 
+    def get_t3k_api_key(self):
+        # precedence: user prefs > system key file next to the MOD api key > build-time env (MOD_TONE3000_CLIENT_ID)
+        api_key = SESSION.prefs.get('t3k-api-key', None)
+
+        if not api_key and API_KEY:
+            # T3K public system (vendor) api
+            file_path = os.path.join(os.path.dirname(API_KEY), 't3k_api_key.pub')
+            if os.path.exists(file_path):
+                logging.info("T3K reading system wide apikey from: %s", file_path)
+                with open(file_path, "r", encoding="utf-8") as f:
+                    api_key = f.read().strip()
+
+        if not api_key:
+            api_key = TONE3000_CLIENT_ID
+
+        return api_key or ''
+
     def index(self):
         user_id = safe_json_load(USER_ID_JSON_FILE, dict)
 
         with open(DEFAULT_ICON_TEMPLATE, 'r') as fh:
-            default_icon_template = squeeze(fh.read().replace("'", "\\'"))
+            default_icon_template = mod_squeeze(fh.read())
 
         with open(DEFAULT_SETTINGS_TEMPLATE, 'r') as fh:
-            default_settings_template = squeeze(fh.read().replace("'", "\\'"))
+            default_settings_template = mod_squeeze(fh.read())
 
         pbname = SESSION.host.pedalboard_name
         prname = SESSION.host.snapshot_name()
@@ -1960,7 +2046,7 @@ class TemplateHandler(TimelessRequestHandler):
         context = {
             'default_icon_template': default_icon_template,
             'default_settings_template': default_settings_template,
-            'default_pedalboard': DEFAULT_PEDALBOARD,
+            'default_pedalboard': mod_squeeze(DEFAULT_PEDALBOARD),
             'cloud_url': CLOUD_HTTP_ADDRESS,
             'cloud_labs_url': CLOUD_LABS_HTTP_ADDRESS,
             'plugins_url': PLUGINS_HTTP_ADDRESS,
@@ -1974,26 +2060,32 @@ class TemplateHandler(TimelessRequestHandler):
             'factory_pedalboards': hwdesc.get('factory_pedalboards', False),
             'platform': hwdesc.get('platform', "Unknown"),
             'addressing_pages': int(hwdesc.get('addressing_pages', 0)),
-            'lv2_plugin_dir': LV2_PLUGIN_DIR,
-            'bundlepath': SESSION.host.pedalboard_path,
-            'title':  squeeze(pbname.replace("'", "\\'")),
+            'lv2_plugin_dir': mod_squeeze(LV2_PLUGIN_DIR),
+            'bundlepath': mod_squeeze(SESSION.host.pedalboard_path),
+            'title':  mod_squeeze(pbname),
             'size': json.dumps(SESSION.host.pedalboard_size),
             'fulltitle':  xhtml_escape(fullpbname),
             'titleblend': '' if SESSION.host.pedalboard_name else 'blend',
             'dev_api_class': 'dev_api' if DEV_API else '',
-            'using_app': 'true' if APP else 'false',
-            'using_mod': 'true' if DEVICE_KEY or DEV_HOST else 'false',
-            'user_name': squeeze(user_id.get("name", "").replace("'", "\\'")),
-            'user_email': squeeze(user_id.get("email", "").replace("'", "\\'")),
+            'using_desktop': 'true' if DESKTOP else 'false',
+            # Real bool, for {% if %}. 'using_desktop' above is the *string*
+            # 'true'/'false', because it is substituted into JS; both strings
+            # are truthy, so it cannot be branched on in the template.
+            'desktop_app': DESKTOP,
+            'using_mod': 'true' if DEVICE_KEY and hwdesc.get('platform', None) is not None else 'false',
+            'user_name': mod_squeeze(user_id.get("name", "")),
+            'user_email': mod_squeeze(user_id.get("email", "")),
             'favorites': json.dumps(gState.favorites),
             'preferences': json.dumps(SESSION.prefs.prefs),
+            'feedback_url': FEEDBACK_URL,
             'bufferSize': get_jack_buffer_size(),
             'sampleRate': get_jack_sample_rate(),
             'patchstorage_enabled': 'true' if PATCHSTORAGE_ENABLED else 'false',
             'patchstorage_api_url': PATCHSTORAGE_API_URL,
             'patchstorage_platform_id': PATCHSTORAGE_PLATFORM_ID,
             'patchstorage_target_id': PATCHSTORAGE_TARGET_ID,
-            'blokas_enabled': 'true' if BLOKAS_ENABLED else 'false'
+            'blokas_enabled': 'true' if BLOKAS_ENABLED else 'false',
+            't3k_api_key': self.get_t3k_api_key()
         }
         return context
 
@@ -2001,10 +2093,10 @@ class TemplateHandler(TimelessRequestHandler):
         bundlepath = self.get_argument('bundlepath')
 
         with open(DEFAULT_ICON_TEMPLATE, 'r') as fh:
-            default_icon_template = squeeze(fh.read().replace("'", "\\'"))
+            default_icon_template = mod_squeeze(fh.read())
 
         with open(DEFAULT_SETTINGS_TEMPLATE, 'r') as fh:
-            default_settings_template = squeeze(fh.read().replace("'", "\\'"))
+            default_settings_template = mod_squeeze(fh.read())
 
         try:
             pedalboard = get_pedalboard_info(bundlepath)
@@ -2043,9 +2135,23 @@ class TemplateHandler(TimelessRequestHandler):
             'version': self.get_argument('v'),
             'hmi_eeprom': 'true' if hwdesc.get('hmi_eeprom', False) else 'false',
             'preferences': json.dumps(prefs),
+            'feedback_url': FEEDBACK_URL,
             'bufferSize': get_jack_buffer_size(),
             'sampleRate': get_jack_sample_rate(),
             'blokas_enabled': 'true' if BLOKAS_ENABLED else 'false'
+        }
+        return context
+
+    def t3k(self):
+        context = {
+            'version': self.get_argument('v'),
+        }
+        return context
+
+    def t3ksplash(self):
+        context = {
+            'version': self.get_argument('v'),
+            't3k_api_key': self.get_t3k_api_key()
         }
         return context
 
@@ -2067,9 +2173,24 @@ class BulkTemplateLoader(TimelessRequestHandler):
                 contents = fh.read()
             self.write("TEMPLATES['%s'] = '%s';\n\n"
                        % (template[:-5],
-                          squeeze(contents.replace("'", "\\'"))
+                          mod_squeeze(contents)
                           )
                        )
+        # MOD Desktop specific templates, exposed as TEMPLATES['desktop_app_<name>'].
+        # Skipped entirely on hardware: nothing there renders them, and they are
+        # dead weight in a bundle the device parses on every load.
+        appdir = os.path.join(basedir, 'desktop-app')
+        if DESKTOP and os.path.isdir(appdir):
+            for template in os.listdir(appdir):
+                if not re.match('^[a-z_]+\.html$', template):
+                    continue
+                with open(os.path.join(appdir, template), 'r') as fh:
+                    contents = fh.read()
+                self.write("TEMPLATES['desktop_app_%s'] = '%s';\n\n"
+                           % (template[:-5],
+                              mod_squeeze(contents)
+                              )
+                           )
         self.finish()
 
     # custom call, we cannot use CachedJsonRequestHandler
@@ -2123,13 +2244,17 @@ class SetBufferSize(JsonRequestHandler):
 
         # If running a real MOD, save this setting for next boot
         if IMAGE_VERSION is not None:
+            with open("/data/jack-buffer-size", 'w') as fh:
+                fh.write('%d\n' % size)
+
+            # Older pi-Stomp images boot from this flag instead of jack-buffer-size.
             if size == 256:
                 with open(USING_256_FRAMES_FILE, 'w') as fh:
                     fh.write("# if this file exists, jack will use 256 frames instead of the default 128")
             elif os.path.exists(USING_256_FRAMES_FILE):
                 os.remove(USING_256_FRAMES_FILE)
 
-            os.sync()
+            os_sync()
 
         newsize = set_jack_buffer_size(size)
         self.write({
@@ -2153,11 +2278,14 @@ class SwitchCpuFreq(JsonRequestHandler):
         index = freqs.index(cur_freq) + 1
         if index >= len(freqs):
             index = 0
+        next_freq = freqs[index]
+        if cur_freq == next_freq:
+            return self.write(True)
         with open("/sys/devices/system/cpu/online", 'r') as fh:
             num_start, num_end = tuple(int(i) for i in fh.read().strip().split("-"))
         for num in range(num_start, num_end+1):
             with open("/sys/devices/system/cpu/cpu%d/cpufreq/scaling_setspeed" % num, 'w') as fh:
-                fh.write(freqs[index])
+                fh.write(next_freq)
         self.write(True)
 
 class SetBpm(JsonRequestHandler):
@@ -2296,7 +2424,7 @@ class TokensDelete(JsonRequestHandler):
 
         if os.path.exists(tokensConf):
             os.remove(tokensConf)
-            os.sync()
+            os_sync()
 
         self.write(True)
 
@@ -2506,6 +2634,126 @@ class SfzBuilderAudio(web.StaticFileHandler):
 
         return absolute_path
 
+class FilesUpload(SimpleFileReceiver):
+    """
+    This is used by the web interface to upload a user file
+
+    Returns the path to the saved file
+    """
+    base_path = basepath = os.path.join(USER_FILES_DIR)
+    filetypes = {
+        ".nam": "nammodel",
+        ".wav": "cabsim",
+        ".aidax": "aidadspmodel"
+    }
+
+    @staticmethod
+    def sanitize_filename(filename: str, replacement: str = "-") -> str:
+        # 1. Normalize Unicode (e.g., convert accented characters like 'é' -> 'e')
+        filename = unicodedata.normalize('NFKD', filename).encode('ascii', 'ignore').decode('ascii')
+
+        # 2. Remove characters that are unsafe across OS (Windows, Linux, macOS)
+        # Allows only alphanumeric, hyphens, underscores, and dots
+        filename = re.sub(r'[^a-zA-Z0-9._\- !\+\(\)\[\]\{\}\.\,\;\:\"\']', replacement, filename)
+
+        # 3. Collapse multiple consecutive replacement characters into one
+        filename = re.sub(re.escape(replacement) + '+', replacement, filename)
+
+        # 4. Strip leading/trailing whitespaces, dots, and replacement characters
+        filename = filename.strip(' .' + replacement)
+
+        # 5. Fallback for empty strings
+        return filename or "unnamed_file"
+
+    @property
+    def destination_dir(self):
+        return '/tmp'
+
+    @web.asynchronous
+    @gen.engine
+    def process_file(self, basename, callback=lambda:None):
+        source_file = os.path.join(self.destination_dir, basename)
+        config = json.loads(urllib.parse.unquote(self.request.headers.get("X-Upload-Config", "{}")))
+
+        logging.info("FilesUpload %s destination filename ''%s''", source_file, config.get('filename', '') if config else 'no config available')
+        if not os.path.exists(source_file):
+            callback()
+            return
+
+        if not os.path.exists(self.destination_dir):
+            os.mkdir(self.destination_dir)
+
+        # directory: subfolder where save the file,
+        # onDirectoryConflict: what to do if directory already exists: 'rename' or merge
+        # filename: filename
+        # metadata:
+        #     are saved in the same folder with the same name of the filename and the extension from the source (eg. t3k)
+        #     the metadata file content is the values inside the data tag JSON format
+        #     {
+        #       source: 'T3K',
+        #       data: {
+        #           toneId: tone.id,
+        #           modelId: model.id
+        #       }
+        #
+        filetypes = {
+            ".nam": "nammodel",
+            ".wav": "cabsim",
+            ".aidax": "aidadspmodel"
+        }
+        model_file_name = FilesUpload.sanitize_filename(config.get('filename', basename))
+        model_base_name, ext = os.path.splitext(model_file_name)
+        filetype = config.get('filetype', None)
+
+        if filetype is None:
+            # try from the extension
+            filetype = filetypes.get(ext, 'ir')
+
+        directory, _ = FilesList._get_dir_and_extensions_for_filetype(filetype)
+        if directory is None:
+            logging.error("no directory found for filetype: %s, extension: %s", filetype, ext)
+            os.remove(source_file)
+            callback()
+            return
+        configDirectory = config.get('directory', "")
+        if configDirectory:
+            model_dir_name = FilesUpload.sanitize_filename(configDirectory)
+        else:
+            model_dir_name = ""
+        basepath = os.path.join(USER_FILES_DIR, directory) # eg. /user-files/NAM Models/
+        dirname = os.path.join(basepath, model_dir_name) # eg. /user-files/NAM Models/VOX AC 30/
+        onDirectoryConflict = config.get('onDirectoryConflict', 'merge').lower()
+        # logging.debug("model_file_name %s, model_base_name %s, ext %s, directory %s, model_dir_name %s, basepath %s, dirname %s",
+        #               model_file_name, model_base_name, ext, directory, model_dir_name, basepath, dirname)
+        if model_dir_name != "" and onDirectoryConflict == 'rename':
+            index = 0
+            while os.path.exists(dirname):
+                index += 1
+                model_dir_name = FilesUpload.sanitize_filename(configDirectory) + " {:02d}".format(index)
+                dirname = os.path.join(basepath, model_dir_name)
+
+        model_name = FilesUpload.sanitize_filename(model_base_name)
+        fullname = os.path.join(dirname, model_file_name) # eg. /user-files/NAM Models/T3K/VOX AC 30/VOX AC 30 Clean.nam
+        index = 0
+        while os.path.exists(fullname):
+            index += 1
+            model_name = FilesUpload.sanitize_filename(model_base_name) + " {:02d}".format(index)
+            model_file_name = model_name + ext
+            fullname = os.path.join(dirname, model_file_name) # eg. /user-files/NAM Models/T3K/VOX AC 30/VOX AC 30 Clean.nam
+
+        os.makedirs(dirname, exist_ok=True)
+
+        shutil.move(source_file, fullname)
+
+        self.result = {
+            'fullname': fullname,
+            'dirname': model_dir_name,
+            'basename': model_file_name,
+            'basepath': basepath,
+            'filetype': filetype,
+        }
+        callback()
+
 class FilesList(JsonRequestHandler):
     complete_audiofile_exts = AUDIO_EXTENSIONS
 
@@ -2557,6 +2805,9 @@ class FilesList(JsonRequestHandler):
         elif filetype == "nammodel":
             return ("NAM Models", (".nam",))
 
+        elif filetype == "easyspinprog":
+            return ("Easy Spin Programs", (".json",))
+
         else:
             return (None, ())
 
@@ -2577,13 +2828,16 @@ class FilesList(JsonRequestHandler):
             if datadir is None:
                 continue
 
-            for root, dirs, files in os.walk(os.path.join(USER_FILES_DIR, datadir)):
+            basepath = os.path.join(USER_FILES_DIR, datadir)
+            for root, dirs, files in os.walk(basepath):
                 for name in tuple(name for name in sorted(files) if name.lower().endswith(extensions)):
                     fullname = os.path.join(root, name)
                     fullnames.append(fullname)
                     retfiles[fullname] = {
                         'fullname': fullname,
+                        'dirname': root[len(basepath) + 1:],
                         'basename': name,
+                        'basepath': basepath,
                         'filetype': filetype,
                     }
 
@@ -2643,6 +2897,8 @@ application = web.Application(
             (r"/effect/connect/*(/[A-Za-z0-9_/]+[^/]),([A-Za-z0-9_/]+[^/])/?", EffectConnect),
             (r"/effect/disconnect/*(/[A-Za-z0-9_/]+[^/]),([A-Za-z0-9_/]+[^/])/?", EffectDisconnect),
 
+            (r"/effect/t3k/select/*(/[A-Za-z0-9_/]+[^/])/?", EffectT3KSelect),
+
             (r"/package/uninstall", PackageUninstall),
 
             # pedalboard stuff
@@ -2691,6 +2947,7 @@ application = web.Application(
 
             # file listing etc
             (r"/files/list/?", FilesList),
+            (r"/files/upload/?", FilesUpload),
 
             # sfz sound-bank builder
             (r"/sfzbuilder/banks/?", SfzBuilderBanks),
@@ -2730,7 +2987,7 @@ application = web.Application(
             (r"/save_user_id/", SaveUserId),
 
             (r"/(index.html)?$", TemplateHandler),
-            (r"/([a-z]+\.html)$", TemplateHandler),
+            (r"/([a-z0-9]+\.html)$", TemplateHandler),
             (r"/(allguis|sdk|settings)$", TemplateHandler),
             (r"/load_template/([a-z_]+\.html)$", TemplateLoader),
             # This route must come before the catch-all below. The islands
@@ -2767,7 +3024,7 @@ def signal_boot_check():
     run_command(["hmi-reset"], None, signal_boot_check_step2)
 
 def signal_boot_check_step2(r):
-    os.sync()
+    os_sync()
     run_command(["reboot"], None, None)
 
 def signal_upgrade_check():
@@ -2819,12 +3076,12 @@ def prepare(isModApp = False):
         get_all_plugins()
         print("Done!")
 
-    if not isModApp:
+    if haveSignal and not isModApp:
         signal(SIGUSR1, signal_recv)
         signal(SIGUSR2, signal_recv)
         set_process_name("mod-ui")
 
-    application.listen(DEVICE_WEBSERVER_PORT, address="0.0.0.0")
+    application.listen(DEVICE_WEBSERVER_PORT, address=("127.0.0.1" if DESKTOP else "0.0.0.0"))
 
     def checkhost():
         if SESSION.host.readsock is None or SESSION.host.writesock is None:

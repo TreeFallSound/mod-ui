@@ -54,8 +54,13 @@ from mod.mod_protocol import (
 from mod.settings import LOG
 
 import logging
-import serial
 import time
+
+try:
+    import serial
+    haveSerial = True
+except ImportError:
+    haveSerial = False
 
 class SerialIOStream(BaseIOStream):
     def __init__(self, sp):
@@ -111,13 +116,21 @@ class HMI(object):
     # this can be overriden by subclasses to avoid any connection in DEV mode
     def init(self, callback):
         ioloop = IOLoop.instance()
+
+        if not haveSerial:
+            print("ERROR: This system has no python serial support")
+            ioloop.call_later(1, callback)
+            return
+
+        virtual = self.port.startswith("/dev/ttyHMI")
+
         try:
             sp = None
             # pylint: disable=unexpected-keyword-arg
             try:
-                sp = serial.Serial(self.port, self.baud_rate, timeout=0, write_timeout=0)
+                sp = serial.Serial(self.port, self.baud_rate, rtscts=virtual, dsrdtr=virtual, timeout=0, write_timeout=0)
             except:
-                sp = serial.Serial(self.port, self.baud_rate, timeout=0, writeTimeout=0)
+                sp = serial.Serial(self.port, self.baud_rate, rtscts=virtual, dsrdtr=virtual, timeout=0, writeTimeout=0)
             # pylint: enable=unexpected-keyword-arg
             sp.flushInput()
             sp.flushOutput()
@@ -448,7 +461,7 @@ class HMI(object):
         self.send(CMD_PING, callback, 'boolean')
 
     def tuner(self, freq, note, cents, callback):
-        self.send('%s %f %s %f' % (CMD_TUNER, freq, note, cents), callback)
+        self.send('%s %f %s %d' % (CMD_TUNER, freq, note, cents), callback)
 
     #TODO, This message should be handled by mod-system-control once in place
     def expression_overcurrent(self, callback):

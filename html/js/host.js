@@ -49,6 +49,69 @@ $('document').ready(function() {
 
         cmd = cmd[0];
 
+        // Port groups arrive as URI strings. Turn them into objects and order
+        // the control inputs so the pedal UI can draw group boundaries.
+        // Bulk load shares one pluginData object per URI, so a second call
+        // must leave an already-resolved object alone.
+        function resolveControlPortGroups(pluginData) {
+            var inputs = pluginData.ports && pluginData.ports.control && pluginData.ports.control.input
+            if (!inputs || !inputs.length) {
+                return
+            }
+            if (inputs.some(function (port) { return port.group && typeof port.group === 'object' })) {
+                return
+            }
+
+            inputs.forEach(function (port) {
+                var groupUri = port.group
+                port.group = undefined
+                port.groupIndex = undefined
+                port.groupCssIndex = undefined
+
+                if (pluginData.portGroups && groupUri) {
+                    port.group = pluginData.portGroups.find(function (group) {
+                        return group.uri === groupUri
+                    })
+
+                    if (port.group) {
+                        port.groupStart = false
+                        port.groupEnd = false
+                        port.groupIndex = pluginData.portGroups.indexOf(port.group)
+                        port.groupCssIndex = port.groupIndex % 32
+                    }
+                }
+            })
+
+            inputs.sort(function (a, b) {
+                if (a.groupIndex < b.groupIndex) {
+                    return -1
+                } else if (a.groupIndex > b.groupIndex) {
+                    return 1
+                } else {
+                    return a.index - b.index
+                }
+            })
+
+            var prevPort = undefined
+            inputs.forEach(function (port) {
+                if (port.group) {
+                    if (prevPort === undefined || prevPort.group === undefined) {
+                        port.groupStart = true
+                    } else if (prevPort.groupIndex != port.groupIndex) {
+                        port.groupStart = true
+                        if (prevPort.group) {
+                            prevPort.groupEnd = true
+                        }
+                    }
+                }
+                prevPort = port
+            })
+
+            if (prevPort !== undefined && prevPort.group) {
+                prevPort.groupEnd = true
+            }
+        }
+
         // these first commands do not have any arguments
         if (cmd == "ping") {
             ws.send("pong")
@@ -126,6 +189,10 @@ $('document').ready(function() {
                 $("#mod-cpu-stats").html(sprintf("%.1f GHz / %d &deg;C",
                                                  parseInt(cpufreq)/1000000,
                                                  parseInt(cputemp)/1000))
+            } else if (cpufreq !== "0") {
+                $("#mod-cpu-stats").html(sprintf("%.1f GHz", parseInt(cpufreq)/1000000))
+            } else if (cputemp !== "0") {
+                $("#mod-cpu-stats").html(sprintf("%d &deg;C", parseInt(cputemp)/1000))
             }
             return
         }
@@ -380,6 +447,7 @@ $('document').ready(function() {
                         },
                         success: function (pluginData) {
                             var instancekey = '[mod-instance="' + instance + '"]'
+                            resolveControlPortGroups(pluginData)
 
                             if (!$(instancekey).length) {
                                 var cb = function () {
@@ -531,6 +599,7 @@ $('document').ready(function() {
             // Wire arrive listener + addPlugin for one buffered entry.
             // Named function avoids loop-closure variable capture bug.
             function schedulePluginAdd(pluginData, p) {
+                resolveControlPortGroups(pluginData)
                 var instancekey = '[mod-instance="' + p.instance + '"]'
                 if (!$(instancekey).length) {
                     var cb = function () {
@@ -550,7 +619,7 @@ $('document').ready(function() {
                 }
                 desktop.pedalboard.pedalboard('scheduleAdapt', true)
                 desktop.pedalboardEmpty      = empty && !modified
-                desktop.pedalboardModified   = modified
+                desktop.setPedalboardAsModified(modified)
                 desktop.pedalboardPresetId   = snapshotId
                 desktop.pedalboardPresetName = resp.name
                 if (resp.ok) {
@@ -655,6 +724,72 @@ $('document').ready(function() {
             } else if (action == "stop") {
                 desktop.setRecordingState(false, data[1], parseFloat(data[2]))
             }
+            return
+        }
+
+        if (cmd == "t3k-tone-selected") {
+            // tone selected from the t3k integration
+            // the first parameter is the effect instance
+            data      = data.split(" ",4)
+            const instance  = data[0]
+            const code = data[1]
+            const state = data[2]
+            const toneId = parseInt(data[3])
+            const t3k = desktop.pedalboard.data('T3KIntegration')
+
+            t3k.t3kToneSelected(instance, code, state, toneId)
+            return
+        }
+
+        if (cmd == "t3k-cancel") {
+            // tone selected from the t3k integration
+            // the first paramater is the effect instance
+            const instance  = data
+            const t3k = desktop.pedalboard.data('T3KIntegration')
+
+            t3k.t3kCancel(instance)
+            return
+        }
+
+        if (cmd == "progress") {
+            // long server operation progress
+            const stringParse = function(str) {
+                // parse the string like string.split, but also support 'strings with spaces'
+                // returns an array of strings
+                const result = []
+                let current = ""
+                let state = false
+
+                for(const c of str) {
+                    if (state == true) {
+                        if (c == "'") {
+                            state = false
+                        } else {
+                            current += c
+                        }
+                    } else {
+                        if (c == "'") {
+                            state = true
+                        } else if (c == " ") {
+                            result.push(current)
+                            current = ""
+                        } else {
+                            current += c
+                        }
+                    }
+                }
+
+                if (current.length > 0) {
+                    result.push(current)
+                }
+
+                return result
+            }
+            data      = stringParse(data)
+            const source = data[0]
+            const msg = data[1].replace('\_', ' ')
+            const progress = parseInt(data[2])
+
             return
         }
     }

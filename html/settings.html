@@ -189,7 +189,7 @@ function refresh_sysprefs() {
                 $("#prefs-bluetooth-name").prop("disabled", true)
             }
 
-            $("#prefs-audio-256-frames").prop("checked", resp.jack_256_frames)
+            $("#prefs-audio-256-frames").prop("checked", resp.jack_buffer_size == 256)
             $("#prefs-audio-mono-copy").prop("checked", resp.jack_mono_copy)
             $("#prefs-audio-sync-mode").prop("checked", resp.jack_sync_mode)
             $("#prefs-audio-separate-spdif-outs").prop("checked", resp.separate_spdif_outs)
@@ -537,6 +537,12 @@ $('document').ready(function() {
     if (PREFERENCES['show-labs-plugins'] == "true") {
         $("#prefs-ui-labs-plugins").prop("checked", true)
     }
+    if (PREFERENCES['update-channel'] == "testing") {
+        $("#prefs-update-channel-testing").prop("checked", true)
+        $("#prefs-update-channel-note").show()
+    } else {
+        $("#prefs-update-channel-stable").prop("checked", true)
+    }
     if (! HMI_EEPROM) {
         $("#prefs-delete-hmi-settings_br").hide()
         $("#prefs-delete-hmi-settings_label").hide()
@@ -674,11 +680,11 @@ $('document').ready(function() {
     // --- Audio Server
 
     $("#prefs-audio-256-frames").click(function () {
-        var using256 = $(this).prop("checked")
-        create_or_delete_file("using-256-frames", using256)
+        var bufferSize = $(this).prop("checked") ? '256' : '128'
+        write_file_contents("jack-buffer-size", bufferSize)
 
         $.ajax({
-            url: '/set_buffersize/' + (using256 ? '256' : '128'),
+            url: '/set_buffersize/' + bufferSize,
             method: 'POST',
             cache: false,
             success: function () {},
@@ -696,6 +702,31 @@ $('document').ready(function() {
     })
 
     // ----------------------------------------------------------------------------------------------------------------
+    // --- Update channel
+    // Stored as a preference only. Nothing reads it yet: the device does not send a channel
+    // when it checks for updates (the server derives the group from the device registration),
+    // so this switch becomes effective once the update service exposes a self-service group.
+
+    $("input[name=prefs-update-channel]").click(function () {
+        var channel = $(this).val()
+        config_set("update-channel", channel)
+        if (channel == "testing") {
+            $("#prefs-update-channel-note").show()
+        } else {
+            $("#prefs-update-channel-note").hide()
+        }
+    })
+
+    // --- Report a problem
+
+    var problemReport = new ProblemReport({
+        version: '{{version}}',
+        feedbackUrl: '{{feedback_url}}',
+    })
+    $("#button-action-report").click(function () {
+        problemReport.open()
+    })
+
     // --- User Interface
 
     $("#prefs-ui-developer-mode").click(function () {
@@ -904,6 +935,7 @@ $('document').ready(function() {
 <script type="text/javascript" src="js/modgui.js?v={{version}}"></script>
 <script type="text/javascript" src="js/notification.js?v={{version}}"></script>
 <script type="text/javascript" src="js/nprogress.js?v={{version}}"></script>
+<script type="text/javascript" src="js/report.js?v={{version}}"></script>
 
 </head>
 <!-- END HEAD -->
@@ -1012,6 +1044,38 @@ $('document').ready(function() {
                     </p>
                     <label>
                         <input type="button" id="button-action-restore" value="Start update mode"></input>
+                    </label>
+                    <br/><br/>
+                    <p>
+                        <b>Update channel</b>.<br/>
+                        Stable receives final releases only. Testing also receives release candidates
+                        before they become final, so you can try new features early and report problems.
+                    </p>
+                    <label>
+                        <input type="radio" name="prefs-update-channel" value="stable" id="prefs-update-channel-stable" autocomplete="off">
+                            Stable
+                        </input>
+                    </label>
+                    <label>
+                        <input type="radio" name="prefs-update-channel" value="testing" id="prefs-update-channel-testing" autocomplete="off">
+                            Testing
+                        </input>
+                    </label>
+                    <p id="prefs-update-channel-note" class="mod-hidden">
+                        Note: the update server does not honour this setting yet. Testing releases are currently
+                        offered to registered devices only, or installed manually from the announcement.
+                    </p>
+                </form>
+
+                <h1>Report a problem</h1>
+                <form class="form">
+                    <p>
+                        <b>Found a bug, or something that does not behave as it should?</b><br/>
+                        This collects the system details a good report needs, for you to paste into the
+                        forum topic of this release. Nothing is sent automatically.
+                    </p>
+                    <label>
+                        <input type="button" id="button-action-report" value="Report a problem..."></input>
                     </label>
                 </form>
             </div>

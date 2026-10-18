@@ -71,6 +71,7 @@ class Session(object):
         self.recorder.watch_for_crash(self._recording_crashed)
         self.external_ui_timer = None
 
+        self.screenshot_needed = False
         self.screenshot_generator = ScreenshotGenerator()
         self.websockets = []
 
@@ -157,10 +158,12 @@ class Session(object):
 
     # Add a new plugin, starts enabled (ie, not bypassed)
     def web_add(self, instance, uri, x, y, callback):
+        self.screenshot_needed = True
         self.host.add_plugin(instance, uri, x, y, callback)
 
     # Remove a plugin
     def web_remove(self, instance, callback):
+        self.screenshot_needed = True
         self.host.remove_plugin(instance, callback)
 
     # Address a plugin parameter
@@ -193,10 +196,12 @@ class Session(object):
 
     # Connect 2 ports
     def web_connect(self, port_from, port_to, callback):
+        self.screenshot_needed = True
         self.host.connect(port_from, port_to, callback)
 
     # Disconnect 2 ports
     def web_disconnect(self, port_from, port_to, callback):
+        self.screenshot_needed = True
         self.host.disconnect(port_from, port_to, callback)
 
     # Save the current pedalboard
@@ -208,7 +213,10 @@ class Session(object):
         if self.hmi.initialized and self.host.descriptor.get('hmi_set_pb_name', False):
             self.hmi_set_pb_name(newTitle or title)
 
-        self.screenshot_generator.schedule_screenshot(bundlepath)
+        if bundlepath and self.screenshot_needed:
+            self.screenshot_needed = False
+            self.screenshot_generator.schedule_screenshot(bundlepath)
+
         return bundlepath, newTitle
 
     # Get list of Hardware MIDI devices
@@ -248,6 +256,9 @@ class Session(object):
             self.host.open_connection_if_needed(ws)
             if self.recorder.recording:
                 ws.write_message("recording start %s" % self.recorder.filename)
+            # a "data_ready" sent before this socket was registered reached nobody, ask again
+            if not self.host.web_data_ready_ok:
+                ws.write_message("data_ready %i" % self.host.web_data_ready_counter)
             callback(True)
 
         # if this is the 1st socket, start ui session
@@ -343,11 +354,13 @@ class Session(object):
 
     # Set a plugin block position within the canvas
     def ws_plugin_position(self, instance, x, y, ws):
+        self.screenshot_needed = True
         self.host.set_position(instance, x, y)
         self.msg_callback_broadcast("plugin_pos %s %d %d" % (instance, x, y), ws)
 
     # set the size of the pedalboard (in 1:1 view, aka "full zoom")
     def ws_pedalboard_size(self, width, height):
+        self.screenshot_needed = True
         self.host.set_pedalboard_size(width, height)
 
     def ws_show_external_ui(self, instance):
@@ -448,6 +461,7 @@ class Session(object):
             ws.write_message(msg)
 
     def load_pedalboard(self, bundlepath, isDefault):
+        self.screenshot_needed = False
         self.host.send_notmodified("feature_enable processing 0")
         title = self.host.load(bundlepath, isDefault)
         self.host.send_notmodified("feature_enable processing 1")
@@ -465,6 +479,7 @@ class Session(object):
 
     def reset(self, callback):
         logging.debug("SESSION RESET")
+        self.screenshot_needed = False
         self.host.send_notmodified("feature_enable processing 0")
         self.host.msg_callback("resetConnections")
 

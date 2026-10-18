@@ -4,6 +4,7 @@ start.sh
 .kdev_include_paths
 package-lock.json
 *~
+*.dll
 *.o
 *.so
 *.pyc

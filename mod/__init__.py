@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 import os
+import sys
 import re
 import json
 import shutil
@@ -12,6 +13,9 @@ from functools import wraps
 from unicodedata import normalize
 
 from mod.settings import HARDWARE_DESC_FILE
+
+
+WINDOWS = sys.platform == 'win32'
 
 
 def jsoncall(method):
@@ -39,6 +43,11 @@ def json_handler(obj):
     return None
 
 
+def os_sync():
+    if not WINDOWS:
+        os.sync()
+
+
 def check_environment():
     from mod.settings import (LV2_PEDALBOARDS_DIR,
                               DEFAULT_PEDALBOARD, DEFAULT_PEDALBOARD_COPY,
@@ -49,9 +58,17 @@ def check_environment():
     # create temp dirs
     if not os.path.exists(DOWNLOAD_TMP_DIR):
         os.makedirs(DOWNLOAD_TMP_DIR)
+
     if os.path.exists(PEDALBOARD_TMP_DIR):
-        shutil.rmtree(PEDALBOARD_TMP_DIR)
-    os.makedirs(PEDALBOARD_TMP_DIR)
+        try:
+            shutil.rmtree(PEDALBOARD_TMP_DIR)
+        except OSError:
+            pass
+        else:
+            os.makedirs(PEDALBOARD_TMP_DIR)
+
+    else:
+        os.makedirs(PEDALBOARD_TMP_DIR)
 
     # remove temp files
     for path in (UPDATE_CC_FIRMWARE_FILE,):
@@ -91,11 +108,11 @@ def check_environment():
     # remove previous update file
     if os.path.exists(UPDATE_MOD_OS_FILE) and not os.path.exists("/root/check-upgrade-system"):
         os.remove(UPDATE_MOD_OS_FILE)
-        os.sync()
+        os_sync()
 
     if os.path.exists(UPDATE_MOD_OS_HERLPER_FILE):
         os.remove(UPDATE_MOD_OS_HERLPER_FILE)
-        os.sync()
+        os_sync()
 
     return True
 
@@ -226,4 +243,8 @@ class TextFileFlusher(object):
         self.filehandle.flush()
         os.fsync(self.filehandle)
         self.filehandle.close()
+
+        if WINDOWS and os.path.exists(self.filename):
+            os.remove(self.filename)
+
         os.rename(self.filename+".tmp", self.filename)

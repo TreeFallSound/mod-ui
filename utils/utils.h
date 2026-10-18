@@ -1,19 +1,5 @@
-/*
- * MOD-UI utilities
- * Copyright (C) 2015-2023 Filipe Coelho <falktx@falktx.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of
- * the License, or any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
- *
- * For a full copy of the GNU General Public License see the COPYING file.
- */
+// SPDX-FileCopyrightText: 2012-2025 MOD Audio UG
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 #ifndef MOD_UTILS_H_INCLUDED
 #define MOD_UTILS_H_INCLUDED
@@ -27,7 +13,11 @@ extern "C" {
 #include <stdint.h>
 #endif
 
+#ifdef _WIN32
+#define MOD_API __declspec (dllexport)
+#else
 #define MOD_API __attribute__ ((visibility("default")))
+#endif
 
 typedef enum {
     kPluginLicenseNonCommercial = 0,
@@ -89,6 +79,14 @@ typedef struct {
 } PluginGUI_Mini;
 
 typedef struct {
+    bool valid;
+    const char* uri;
+    const char* symbol;
+    const char* name;
+    int index;
+} PluginPortGroup;
+
+typedef struct {
     float min;
     float max;
     float def;
@@ -116,6 +114,7 @@ typedef struct {
     PluginPortUnits units;
     const char* comment;
     const char* designation;
+    const char* group;
     const char* const* properties;
     int rangeSteps;
     const PluginPortScalePoint* scalePoints;
@@ -197,6 +196,7 @@ typedef struct {
     const char* const* bundles;
     PluginGUI gui;
     PluginPorts ports;
+    const PluginPortGroup* portGroups;
     const PluginParameter* parameters;
     const PluginPreset* presets;
     patchstorage_info_t psInfo;
@@ -440,9 +440,6 @@ MOD_API const char* const* list_plugins_in_bundle(const char* bundle);
 
 // Convert a file URI to a local path string.
 MOD_API const char* file_uri_parse(const char* fileuri);
-
-// helper utilities
-MOD_API void set_cpu_affinity(int cpu);
 
 // jack stuff
 MOD_API bool init_jack(void);

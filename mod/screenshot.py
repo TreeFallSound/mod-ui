@@ -5,9 +5,10 @@
 import os
 import subprocess
 import sys
+import logging
 
 from tornado.ioloop import IOLoop
-from mod.settings import HTML_DIR, DEV_ENVIRONMENT, DEVICE_KEY, CACHE_DIR
+from mod.settings import HTML_DIR, DEV_ENVIRONMENT, DEVICE_KEY, CACHE_DIR, DESKTOP
 
 
 def generate_screenshot(bundle_path, callback):
@@ -21,24 +22,36 @@ def generate_screenshot(bundle_path, callback):
         pass
 
     cwd = os.path.abspath(os.path.join(os.path.dirname(__file__), '../'))
-    cmd = [sys.executable, '-m', 'modtools.pedalboard', 'take_screenshot', bundle_path, HTML_DIR, CACHE_DIR]
-    if not DEV_ENVIRONMENT and DEVICE_KEY:  # if using a real MOD, setup niceness
-        cmd = ['/usr/bin/nice', '-n', '+34'] + cmd
 
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, cwd=cwd)
+    # running packaged through cxfreeze
+    if DESKTOP and os.path.isfile(sys.argv[0]):
+        cmd = [os.path.join(cwd, 'mod-pedalboard'), 'take_screenshot', bundle_path, HTML_DIR, CACHE_DIR]
+        if sys.platform == 'win32':
+            cmd[0] += ".exe"
+        logging.debug('[screenshot] now running: %s', ' '.join(cmd))
+
+    # regular run: sys.executable so a venv's Pillow is the one that takes the shot
+    else:
+        cmd = [sys.executable, '-m', 'modtools.pedalboard', 'take_screenshot', bundle_path, HTML_DIR, CACHE_DIR]
+        if not DEV_ENVIRONMENT and DEVICE_KEY:  # if using a real MOD, setup niceness
+            cmd = ['/usr/bin/nice', '-n', '+34'] + cmd
+
+    proc = subprocess.Popen(cmd, cwd=cwd)
     loop = IOLoop.instance()
 
-    def proc_callback(fileno, _):
+    def proc_callback():
         if proc.poll() is None:
+            loop.call_later(0.5, proc_callback)
             return
-        loop.remove_handler(fileno)
 
         if not os.path.exists(screenshot) or not os.path.exists(thumbnail):
-            return callback()
+            logging.warn('[screenshot] process finished but image files do not exist')
+            callback()
+            return
 
         callback(thumbnail)
 
-    loop.add_handler(proc.stdout.fileno(), proc_callback, 16)
+    loop.call_later(0.5, proc_callback)
 
 
 class ScreenshotGenerator(object):
@@ -83,7 +96,7 @@ class ScreenshotGenerator(object):
         try:
             generate_screenshot(self.processing, img_callback)
         except Exception as ex:
-            print('ERROR: {0}'.format(ex))
+            logging.error('[screenshot] %s', ex)
             img_callback()
 
     def check_screenshot(self, bundlepath):

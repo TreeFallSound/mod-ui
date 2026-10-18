@@ -33,9 +33,12 @@ def resize_image(img):
     if height > MAX_THUMB_HEIGHT:
         width = width * MAX_THUMB_HEIGHT / height
         height = MAX_THUMB_HEIGHT
-    # ANTIALIAS was removed in Pillow 10; LANCZOS is its direct replacement
-    # (kept as a top-level alias, so this works on old and new Pillow alike).
-    img.thumbnail((width, height), Image.LANCZOS)
+    # ANTIALIAS was removed in Pillow 10. LANCZOS is the same filter, and
+    # older Pillow still exposes it as an alias.
+    if hasattr(Image, 'LANCZOS'):
+        img.thumbnail((width, height), Image.LANCZOS)
+    else:
+        img.thumbnail((width, height), Image.ANTIALIAS)
 
 
 class Anchor(Enum):
@@ -558,7 +561,7 @@ def main():
     args = parser.parse_args()
     if hasattr(args, 'func'):
         args.func(args)
-        exit(0)
+        sys.exit(0)
     else:
         parser.print_usage()
 
