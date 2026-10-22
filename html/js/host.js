@@ -728,16 +728,23 @@ $('document').ready(function() {
         }
 
         if (cmd == "t3k-tone-selected") {
-            // tone selected from the t3k integration
-            // the first parameter is the effect instance
-            data      = data.split(" ",4)
-            const instance  = data[0]
-            const code = data[1]
-            const state = data[2]
-            const toneId = parseInt(data[3])
+            // tone selected from the t3k integration.
+            // Payload is base64 JSON so the OAuth code is not split on spaces.
+            var payload
+            try {
+                payload = JSON.parse(atob(data))
+            } catch (e) {
+                data = data.split(" ", 4)
+                payload = {
+                    instance: data[0],
+                    code: data[1],
+                    state: data[2],
+                    tone_id: parseInt(data[3], 10)
+                }
+            }
             const t3k = desktop.pedalboard.data('T3KIntegration')
 
-            t3k.t3kToneSelected(instance, code, state, toneId)
+            t3k.t3kToneSelected(payload.instance, payload.code, payload.state, parseInt(payload.tone_id, 10))
             return
         }
 

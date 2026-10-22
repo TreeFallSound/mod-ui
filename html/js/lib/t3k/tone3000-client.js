@@ -338,15 +338,24 @@ export async function exchangeCode(publishableKey, redirectUri, code, returnedSt
     });
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        return { ok: false, error: err.error ?? 'token_exchange_failed' };
+        // OAuth errors use `error`; GoTrue (the email-code login) uses `error_code`/`msg`.
+        const message = err.error_description || err.msg || err.error || err.error_code || 'token_exchange_failed';
+        return { ok: false, error: message };
     }
     const data = await res.json();
+    const session = data.session || data.data?.session || data.data || {};
+    const access_token = data.access_token || session.access_token;
+    const refresh_token = data.refresh_token || session.refresh_token;
+    const expires_in = data.expires_in || session.expires_in;
+    if (!access_token) {
+        return { ok: false, error: 'token response missing access_token' };
+    }
     return {
         ok: true,
         tokens: {
-            access_token: data.access_token,
-            refresh_token: data.refresh_token,
-            expires_at: Date.now() + data.expires_in * 1000,
+            access_token: access_token,
+            refresh_token: refresh_token,
+            expires_at: Date.now() + (expires_in || 0) * 1000,
         },
     };
 }

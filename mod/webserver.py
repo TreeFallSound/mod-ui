@@ -950,7 +950,10 @@ class EffectT3KSelect(JsonRequestHandler):
         code = self.get_query_argument('code', default=None)
         state = self.get_query_argument('state', default=None)
         tone_id = int(self.get_query_argument('tone_id', default=0))
-        canceled = bool(self.get_query_argument('canceled', default=False))
+        # A non-empty string is truthy, so bool("false") would cancel a
+        # successful select. Only the explicit true values count.
+        canceled_arg = self.get_query_argument('canceled', default='')
+        canceled = str(canceled_arg).lower() in ('1', 'true', 'yes')
 
         # if state != session.get('t3k_state'):
         #     raise ValueError('State mismatch. Possible CSRF attack.')
@@ -961,7 +964,15 @@ class EffectT3KSelect(JsonRequestHandler):
             # If code is absent, the user closed before signing in.
             SESSION.host.msg_callback('t3k-cancel %s' % (instance))
         else:
-            SESSION.host.msg_callback('t3k-tone-selected %s %s %s %s' % (instance, code, state, tone_id))
+            # One blob: an OAuth code can contain characters that a
+            # space-separated websocket message would split apart.
+            payload = b64encode(json.dumps({
+                'instance': instance,
+                'code': code or '',
+                'state': state or '',
+                'tone_id': tone_id,
+            }).encode('utf-8')).decode('ascii')
+            SESSION.host.msg_callback('t3k-tone-selected %s' % payload)
 
         self.write('')
 

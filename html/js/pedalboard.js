@@ -3068,6 +3068,33 @@ function T3KIntegration(pedalboard, pubKey) {
     const self = this
     let t3kOpenPopups = []
 
+    // Stored value is either {access_token, ...} or the older {ok, tokens:{access_token}}.
+    const storedAccessToken = function(stored) {
+        if (!stored) return null
+        return stored.access_token || (stored.tokens && stored.tokens.access_token) || null
+    }
+
+    const t3kFailure = function(error) {
+        const message = (error && error.message) ? error.message : String(error)
+        if (message === 'state_mismatch' || message === 'missing_verifier' || message === 'missing_code') {
+            return 'Tone3000 sign-in did not complete. The email code only signs you in on their site; start the download again and select a tone.'
+        }
+        return message
+    }
+
+    const t3kGet = async function(url, accessToken) {
+        const res = await fetch(url, {
+            headers: { 'Authorization': 'Bearer ' + accessToken },
+            cache: 'no-store',
+        })
+        const body = await res.json().catch(() => ({}))
+        if (!res.ok) {
+            const detail = body.error_description || body.msg || body.error || res.statusText || 'request failed'
+            throw new Error(res.status + ' ' + detail)
+        }
+        return body
+    }
+
     this.pedalboard = pedalboard
     /*
      * Find ongoing t3k state by effect.
@@ -3099,14 +3126,15 @@ function T3KIntegration(pedalboard, pubKey) {
             if (hasApiKey) {
                     // check if I'm authenticated
                     const auth = window.Tone3000Client.getTokens()
-                    if (auth != null) {
+                    const accessToken = storedAccessToken(auth)
+                    if (accessToken) {
                         // note that this call is sync
                         $.ajax({
                         url: `https://www.tone3000.com/api/v1/user`,
                         type: 'GET',
                         async: false,
                         headers: {
-                            'Authorization': 'Bearer ' + auth.tokens.access_token
+                            'Authorization': 'Bearer ' + accessToken
                         },
                         success: function (tone) {
                             authenticated = true
@@ -3188,20 +3216,13 @@ function T3KIntegration(pedalboard, pubKey) {
     }
 
     this.getToneInfo = async function (access_token, toneId) {
+        if (!access_token) {
+            throw new Error('Tone3000 did not return an access token')
+        }
         try {
-            const tone = await $.ajax({
-                url: 'https://www.tone3000.com/api/v1/tones/' + toneId,
-                type: 'GET',
-                headers: {
-                    'Authorization': 'Bearer ' + access_token
-                },
-                cache: false,
-                dataType: 'json'
-            })
-
-            return tone
+            return await t3kGet('https://www.tone3000.com/api/v1/tones/' + encodeURIComponent(toneId), access_token)
         } catch (error) {
-            throw new Error(`Error downloading the tone metadata: ${error}`)
+            throw new Error(`Error downloading the tone metadata: ${t3kFailure(error)}`)
         }
     }
 
@@ -3221,14 +3242,7 @@ function T3KIntegration(pedalboard, pubKey) {
                 baseurl += '&architecture=2'
 
             while (models.length < total) {
-                const pageModels = await $.ajax({
-                    url: `${baseurl}&page=${page}&page_size=${pageSize}`,
-                    headers: {
-                        'Authorization': 'Bearer ' + access_token
-                    },
-                    cache: false,
-                    dataType: 'json'
-                })
+                const pageModels = await t3kGet(`${baseurl}&page=${page}&page_size=${pageSize}`, access_token)
 
                 if (!pageModels.data || pageModels.data.length == 0)
                     throw new Error('no models on data')
@@ -3238,7 +3252,7 @@ function T3KIntegration(pedalboard, pubKey) {
             }
             return models
         } catch (error) {
-            throw new Error(`Error downloading the tone models metadata: ${error}`)
+            throw new Error(`Error downloading the tone models metadata: ${t3kFailure(error)}`)
         }
     }
 
@@ -3340,8 +3354,9 @@ function T3KIntegration(pedalboard, pubKey) {
         }
         const onError = function(t3kinfo, error) {
             cleanup(t3kinfo)
-            new Notification('error', 'Error downloading from Tone3000.')
-            console.error(`t3kToneSelected status error: ${error} `);
+            const message = t3kFailure(error)
+            new Notification('error', 'Error downloading from Tone3000. ' + message)
+            console.error('t3kToneSelected status error:', error)
         }
         const t3kinfo = findInfoByEffect(effect)
 
@@ -3362,11 +3377,14 @@ function T3KIntegration(pedalboard, pubKey) {
         t3kClient
             .exchangeCode(pubKey, callbackUrl, code, state)
             .then((auth) => {
-                if (auth?.ok) {
-                    // fetching the tone info
-                    t3kClient.setTokens(auth)
-                    self
-                        .getToneInfo(auth.tokens.access_token, toneId)
+                const accessToken = auth?.tokens?.access_token
+                if (!auth?.ok || !accessToken) {
+                    throw new Error(auth?.error || 'Tone3000 did not return an access token')
+                }
+                // fetching the tone info. The email verification code is not this token.
+                t3kClient.setTokens(auth.tokens)
+                self
+                    .getToneInfo(accessToken, toneId)
                         .then((tone) => {
                             // update the popup with the info of the tone
                             const title = tone.title
@@ -3409,7 +3427,6 @@ function T3KIntegration(pedalboard, pubKey) {
                         .catch((errTone) => {
                             onError(t3kinfo, errTone)
                         })
-                }
             })
             .catch((error) => {
                 onError(t3kinfo, error)
