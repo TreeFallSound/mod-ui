@@ -40,7 +40,10 @@ else:
 DATA_DIR = os.environ.get('MOD_DATA_DIR', os.path.expanduser('~/data'))
 PRESETS_DIR = os.environ.get('MOD_PRESETS_DIR', os.path.expanduser('~/.lv2'))
 CACHE_DIR = os.path.join(DATA_DIR, '.cache')
-USER_FILES_DIR = os.environ.get('MOD_USER_FILES_DIR', '/data/user-files')
+# Dwarf images keep user files at /data/user-files and set MOD_USER_FILES_DIR.
+# pi-Stomp keeps them next to the rest of the data dir, e.g.
+# /home/pistomp/data/user-files. NAM captures are written under "NAM Models".
+USER_FILES_DIR = os.environ.get('MOD_USER_FILES_DIR', join(DATA_DIR, 'user-files'))
 KEYS_PATH = os.environ.get('MOD_KEYS_PATH', join(DATA_DIR, 'keys'))
 FAVORITES_JSON_FILE = os.environ.get('MOD_FAVORITES_JSON', join(DATA_DIR, 'favorites.json'))
 LAST_STATE_JSON_FILE = os.environ.get('MOD_LAST_STATE_JSON', join(DATA_DIR, 'last.json'))

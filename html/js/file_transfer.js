@@ -58,11 +58,19 @@ $.ajaxTransport("+binary", function(options, originalOptions, jqXHR){
 var isInstallingPackage = false
 
 function SimpleTransference(from, to, options) {
-    this.origin = from.replace(/\/?$/, '/')
-    this.destination = to.replace(/\/?$/, '/')
     this.options = $.extend({ from_args: {},
-                              to_args: {}
+                              to_args: {},
+                              // Package installs use directory URLs. File URLs
+                              // (a Tone3000 model_url, often signed) must be fetched as given.
+                              rawUrls: false
                             }, options)
+    if (this.options.rawUrls) {
+        this.origin = from
+        this.destination = to
+    } else {
+        this.origin = from.replace(/\/?$/, '/')
+        this.destination = to.replace(/\/?$/, '/')
+    }
 
     this.request = null;
 

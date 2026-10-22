@@ -2682,7 +2682,10 @@ class FilesUpload(SimpleFileReceiver):
 
     @web.asynchronous
     @gen.engine
-    def process_file(self, basename, callback=lambda:None):
+    def process_file(self, basename, headers, callback=lambda:None):
+        # `headers` is passed by SimpleFileReceiver.post. The upload call is
+        # gen.Task(process_file, basename, headers), so omitting it makes the
+        # request fail with 500 before any file is written.
         source_file = os.path.join(self.destination_dir, basename)
         config = json.loads(urllib.parse.unquote(self.request.headers.get("X-Upload-Config", "{}")))
 
@@ -2752,9 +2755,14 @@ class FilesUpload(SimpleFileReceiver):
             model_file_name = model_name + ext
             fullname = os.path.join(dirname, model_file_name) # eg. /user-files/NAM Models/T3K/VOX AC 30/VOX AC 30 Clean.nam
 
-        os.makedirs(dirname, exist_ok=True)
-
-        shutil.move(source_file, fullname)
+        try:
+            os.makedirs(dirname, exist_ok=True)
+            shutil.move(source_file, fullname)
+        except OSError as exc:
+            logging.exception("FilesUpload could not save %s", fullname)
+            self.result = {'error': 'could not save %s: %s' % (fullname, exc)}
+            callback()
+            return
 
         self.result = {
             'fullname': fullname,

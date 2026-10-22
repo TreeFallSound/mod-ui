@@ -3257,7 +3257,10 @@ function T3KIntegration(pedalboard, pubKey) {
     }
 
     /*
-     * This function download the models files and upload to the device using the file upload api
+     * The browser downloads each model from Tone3000, then POSTs the bytes to
+     * this unit at /files/upload. mod-ui writes them under the user-files
+     * directory (NAM Models, Speaker Cabinets IRs, or Reverb IRs). Nothing is
+     * kept on the computer running the browser.
      */
     this.downloadModelsFiles = async function (access_token, tone, models, progressFunc) {
         try {
@@ -3301,6 +3304,7 @@ function T3KIntegration(pedalboard, pubKey) {
                                         model.model_url,
                                         '/files/upload',
                                         {
+                                            rawUrls: true,
                                             from_args: {
                                                 headers: { 'Authorization': 'Bearer ' + access_token }
                                             },
@@ -3325,8 +3329,8 @@ function T3KIntegration(pedalboard, pubKey) {
                     transfer.start()
                 })
 
-                if (!response.ok)
-                    throw new Error(model.name)
+                if (!response.ok || !response.result || response.result.error)
+                    throw new Error((response.result && response.result.error) || model.name)
 
                 if (current == 1) // place all the other files in the same directory (the server can rename the directory to not overwrite files)
                     directory = response.result.dirname
