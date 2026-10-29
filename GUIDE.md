@@ -58,6 +58,10 @@ python3 server.py
 
 On the device these values are injected by the `mod-ui.service` in `pi-gen-pistomp` (see `debpkgs/mod-ui/debian/mod-ui.mod-ui.service`).
 
+## Testing a branch on a pi-Stomp
+
+`./deploy.sh` copies this working tree over the packaged mod-ui on the device and restarts it; `./deploy.sh restore` puts the packaged version back. See [`docs/deploying-to-pistomp.md`](docs/deploying-to-pistomp.md) for the recipe and its limits.
+
 ## Repo layout
 
 | Path | Purpose |
