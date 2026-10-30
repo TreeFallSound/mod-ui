@@ -249,6 +249,11 @@ class PatchstorageClient(object):
             code = err.get('code') or ''
             logging.warning('[patchstorage] %s %s failed (%d): %s', method, path, e.code, raw[:500])
             message = _clean_message(err.get('message')) or 'Patchstorage error %d' % e.code
+            params = (err.get('data') or {}).get('params') if isinstance(err.get('data'), dict) else None
+            if not isinstance(params, dict):
+                params = {}
+            if params:
+                message += ' (%s)' % '; '.join('%s: %s' % (k, _clean_message(str(v))) for k, v in params.items())
             if authenticated and (e.code == 401 or code.startswith('jwt_auth')):
                 self.logout()
                 raise PatchstorageError('Your Patchstorage login has expired, log in again', auth_required=True, status=e.code)
@@ -265,6 +270,28 @@ class PatchstorageClient(object):
 
     def get_patch(self, patch_id):
         return self._request('GET', '/patches/%d' % int(patch_id), authenticated=False)
+
+    def _create_patch(self, patch_fields, json_body):
+        """
+        POST /patches as JSON (a form sends ids as strings, which PUT refuses). On create the
+        API has refused preview_url in a JSON body, sent or not, and its docs list only form
+        encodings for this call, so on that refusal try once more as a form. A 400 creates nothing.
+        """
+        try:
+            return self._request('POST', '/patches', body=json_body, content_type='application/json')
+        except PatchstorageError as e:
+            if e.status != 400 or 'preview_url' not in e.message:
+                raise
+            json_error = e.message
+            logging.warning('[patchstorage] create refused as JSON (%s), trying as a form', json_error)
+        try:
+            return self._request('POST', '/patches', body=_encode_form(patch_fields),
+                                 content_type='application/x-www-form-urlencoded')
+        except PatchstorageError as e:
+            if e.status is None or not 400 <= e.status < 500:
+                raise
+            raise PatchstorageError('Patchstorage refused the new pedalboard. As JSON: %s. As a form: %s'
+                                    % (json_error, e.message), status=e.status)
 
     def _confirm_after_redirect(self, error, patch_id, file_id, artwork_id):
         """
@@ -301,7 +328,7 @@ class PatchstorageClient(object):
         """
         Upload the bundle and create (patch_id None) or update a patch.
         fields: title, content, revision, tags (list of str), license (int), state (int),
-        preview_url (optional; empty clears it).
+        preview_url (optional; on an update empty leaves the current one).
         artwork: image bytes, used only when the bundle has no screenshot.png.
         Returns {'id', 'url', 'revision'} and stamps patchstorage.json into the bundle.
         """
@@ -368,11 +395,10 @@ class PatchstorageClient(object):
                 os.remove(zippath)
 
             # JSON, not a form: Patchstorage rejects ids that arrive as strings
-            body = json.dumps({
+            patch_fields = {
                 'title': title,
                 'content': content,
                 'revision': revision,
-                'preview_url': preview_url,
                 'files': [file_id],
                 'artwork': artwork_id,
                 'tags': tags,
@@ -380,11 +406,15 @@ class PatchstorageClient(object):
                 'license': license_id,
                 'state': state,
                 'platform': self.platform_id,
-            }).encode('utf-8')
+            }
+            # An empty preview_url is refused, so a link can be set or changed but not cleared
+            if preview_url:
+                patch_fields['preview_url'] = preview_url
+            body = json.dumps(patch_fields).encode('utf-8')
             submitted = True
             try:
                 if patch_id is None:
-                    patch = self._request('POST', '/patches', body=body, content_type='application/json')
+                    patch = self._create_patch(patch_fields, body)
                 else:
                     patch = self._request('PUT', '/patches/%d' % int(patch_id), body=body, content_type='application/json')
             except PatchstorageError as e:

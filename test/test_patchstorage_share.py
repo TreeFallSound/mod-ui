@@ -50,6 +50,7 @@ class FakePatchstorage(object):
         self.reject_token = False
         self.fail_patch = False
         self.redirect_after_write = False
+        self.json_create_broken = False
         self.password = 'secret'
 
     def new_id(self):
@@ -119,13 +120,24 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, {'deleted': True})
 
         if path == '/patches' and method == 'POST' or path.startswith('/patches/') and method == 'PUT':
+            is_json = self.headers.get('Content-Type', '').startswith('application/json')
+            if method == 'POST' and api.json_create_broken:
+                # what patchstorage.com did on create: preview_url refused in JSON, a form accepted
+                if is_json:
+                    return self.reply(400, {'code': 'rest_invalid_param', 'message': 'Invalid parameter(s): preview_url',
+                                            'data': {'params': {'preview_url': 'preview_url is not of type string or empty.'}}})
+                form = {k.rstrip('[]'): [int(x) if x.isdigit() else x for x in v] if k.endswith('[]')
+                        else (int(v[0]) if v[0].isdigit() else v[0]) for k, v in form.items()}
             # Like the real API: id fields must arrive as JSON integers, not strings
             def is_int(v):
                 return isinstance(v, int) and not isinstance(v, bool)
             invalid = [k for k in ('files', 'artwork', 'categories', 'license', 'platform', 'state')
                        if not (all(map(is_int, form.get(k))) if isinstance(form.get(k), list) else is_int(form.get(k)))]
+            if form.get('preview_url', 'missing') in ('', None):
+                invalid.append('preview_url')
             if invalid:
-                return self.reply(400, {'code': 'rest_invalid_param', 'message': 'Invalid parameter(s): ' + ', '.join(invalid)})
+                return self.reply(400, {'code': 'rest_invalid_param', 'message': 'Invalid parameter(s): ' + ', '.join(invalid),
+                                        'data': {'status': 400, 'params': {k: '%s is not valid.' % k for k in invalid}}})
             if api.fail_patch == 302:
                 self.send_response(302)
                 self.send_header('Location', 'https://patchstorage.com/elsewhere/')
@@ -140,7 +152,7 @@ class Handler(BaseHTTPRequestHandler):
             api.patches[pid] = {
                 'title': form['title'], 'content': form['content'], 'revision': form['revision'],
                 'files': form['files'], 'artwork': form['artwork'], 'categories': form['categories'],
-                'license': form['license'], 'state': form['state'], 'preview_url': form.get('preview_url'),
+                'license': form['license'], 'state': form['state'], 'preview_url': form.get('preview_url', api.patches.get(pid, {}).get('preview_url')),
                 'tags': [{'name': t} for t in form.get('tags', [])], 'platform': form['platform'],
                 'author': {'id': USER_ID, 'slug': 'treefallsound', 'name': 'treefallsound'},
             }
@@ -186,7 +198,8 @@ class ShareTestCase(unittest.TestCase):
         self.client = PatchstorageClient('http://127.0.0.1:%d' % self.server.server_port,
                                          os.path.join(self.tmp, 'auth.json'), 12520, 372, 'pi-Stomp mod-ui/test')
         self.fields = {'title': 'Crunch', 'content': 'A crunchy board', 'revision': '1.0',
-                       'tags': ['pedalboard', ' pi-stomp ', ''], 'license': '4181', 'state': '151'}
+                       'tags': ['pedalboard', ' pi-stomp ', ''], 'license': '4181', 'state': '151',
+                       'preview_url': 'https://youtu.be/crunch'}
 
     def tearDown(self):
         self.server.shutdown()
@@ -256,10 +269,45 @@ class TestShare(ShareTestCase):
 
     def test_preview_url(self):
         self.login()
+        body = json.dumps({'preview_url': '', 'files': [1], 'artwork': 1, 'categories': [1], 'license': 1,
+                           'platform': 1, 'state': 1, 'title': 't', 'content': 'c', 'revision': '1'}).encode()
+        with self.assertRaises(PatchstorageError) as ctx:
+            self.client._request('POST', '/patches', body=body, content_type='application/json')
+        self.assertEqual(ctx.exception.message,
+                         'Invalid parameter(s): preview_url (preview_url: preview_url is not valid.)')
+
         first = self.client.share(self.bundle, dict(self.fields, preview_url=' https://youtu.be/abc '))
         self.assertEqual(self.api.patches[first['id']]['preview_url'], 'https://youtu.be/abc')
-        self.client.share(self.bundle, dict(self.fields, revision='1.1'), patch_id=first['id'])
-        self.assertEqual(self.api.patches[first['id']]['preview_url'], '', 'an empty field clears the link')
+        self.client.share(self.bundle, dict(self.fields, revision='1.1', preview_url=''), patch_id=first['id'])
+        self.assertEqual(self.api.patches[first['id']]['preview_url'], 'https://youtu.be/abc',
+                         'an empty field leaves the existing link')
+
+    def test_new_share_without_preview_url(self):
+        self.login()
+        result = self.client.share(self.bundle, dict(self.fields, preview_url=' '))
+        self.assertIsNone(self.api.patches[result['id']]['preview_url'])
+
+    def test_create_falls_back_to_form(self):
+        self.login()
+        self.api.json_create_broken = True
+        result = self.client.share(self.bundle, dict(self.fields, preview_url=''))
+        patch = self.api.patches[result['id']]
+        self.assertEqual((patch['license'], patch['categories'], patch['platform']), (4181, [372], 12520))
+        posts = [r for r in self.api.requests if r['path'] == '/patches']
+        self.assertEqual(len(posts), 2)
+        self.assertIn('files[]', posts[1]['form'], 'the retry is a WordPress-style form')
+
+        # and a revision still goes out as JSON
+        self.client.share(self.bundle, dict(self.fields, revision='1.1'), patch_id=result['id'])
+        self.assertEqual(self.api.patches[result['id']]['revision'], '1.1')
+
+    def test_create_refused_both_ways(self):
+        self.login()
+        self.api.json_create_broken = True
+        with self.assertRaises(PatchstorageError) as ctx:
+            self.client._create_patch({'title': 'T', 'files': ['bad']}, b'{}')
+        self.assertIn('As JSON: Invalid parameter(s): preview_url', ctx.exception.message)
+        self.assertIn('As a form:', ctx.exception.message)
 
     def test_broken_links_are_left_out(self):
         self.login()

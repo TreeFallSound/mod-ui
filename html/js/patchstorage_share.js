@@ -285,6 +285,7 @@ JqueryClass('patchstorageShareBox', {
             form.find('select[name=license]').val(String(patch.license))
             form.find('select[name=state]').val(String(patch.state))
             form.find('input[name=preview_url]').val(patch.preview_url || '')
+            form.find('.js-preview-hint').text('(optional)')
             form.find('.js-publish').text('Publish revision')
         } else {
             var description = 'A pedalboard for pi-Stomp.'
@@ -298,6 +299,7 @@ JqueryClass('patchstorageShareBox', {
             form.find('select[name=license]').val('')
             selectBySlug('state', 'ready-to-go')
             form.find('input[name=preview_url]').val('')
+            form.find('.js-preview-hint').text('(optional)')
             form.find('.js-publish').text('Publish')
         }
     },
