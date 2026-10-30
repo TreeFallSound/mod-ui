@@ -288,10 +288,14 @@ JqueryClass('patchstorageShareBox', {
             form.find('.js-preview-hint').text('(optional)')
             form.find('.js-publish').text('Publish revision')
         } else {
-            var description = 'A pedalboard for pi-Stomp.'
-            if (info.plugins.length) {
-                description += '\n\nPlugins: ' + info.plugins.join(', ')
+            var lines = []
+            if (info.snapshots.length) {
+                lines.push('Snapshots: ' + info.snapshots.join(', '))
             }
+            if (info.plugins.length) {
+                lines.push('Plugins: ' + info.plugins.join(', '))
+            }
+            var description = lines.join('\n\n')
             form.find('input[name=title]').val(info.title)
             form.find('textarea[name=content]').val(description)
             form.find('input[name=revision]').val('1.0')

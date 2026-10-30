@@ -26,7 +26,7 @@ from collections import namedtuple
 from email.parser import BytesParser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from mod.patchstorage_share import PatchstorageClient, PatchstorageError, bump_revision
+from mod.patchstorage_share import PatchstorageClient, PatchstorageError, bump_revision, read_snapshot_names
 
 USER_ID = 19718
 
@@ -451,6 +451,32 @@ class TestShare(ShareTestCase):
         self.assertTrue(self.client.owns({'author': {'id': USER_ID}}))
         self.assertTrue(self.client.owns({'author': {'id': 1, 'slug': 'treefallsound'}}))
         self.assertFalse(self.client.owns({'author': {'id': 1, 'slug': 'crosenau', 'name': 'crosenau'}}))
+
+
+class TestSnapshotNames(unittest.TestCase):
+    def setUp(self):
+        self.bundle = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.bundle)
+
+    def write(self, name, data):
+        with open(os.path.join(self.bundle, name), 'w') as fh:
+            fh.write(data if isinstance(data, str) else json.dumps(data))
+
+    def test_snapshots_json(self):
+        self.write('snapshots.json', {'current': 0, 'snapshots': [
+            {'name': 'Clean', 'data': {}}, {'name': ' Lead ', 'data': {}}, {'name': '', 'data': {}}, None]})
+        self.assertEqual(read_snapshot_names(self.bundle), ['Clean', 'Lead'])
+
+    def test_older_presets_json(self):
+        self.write('presets.json', [{'name': 'Verse'}, {'name': 'Chorus'}])
+        self.assertEqual(read_snapshot_names(self.bundle), ['Verse', 'Chorus'])
+
+    def test_missing_or_broken(self):
+        self.assertEqual(read_snapshot_names(self.bundle), [])
+        self.write('snapshots.json', '{not json')
+        self.assertEqual(read_snapshot_names(self.bundle), [])
 
 
 class TestRevision(unittest.TestCase):

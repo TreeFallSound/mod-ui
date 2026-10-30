@@ -117,6 +117,22 @@ def read_bundle_metadata(bundlepath):
     return None
 
 
+def read_snapshot_names(bundlepath):
+    """Snapshot names from snapshots.json, or from presets.json in older pedalboards."""
+    for filename in ('snapshots.json', 'presets.json'):
+        try:
+            with open(os.path.join(bundlepath, filename), 'r', encoding='utf-8') as fh:
+                data = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        snapshots = data.get('snapshots') if isinstance(data, dict) else data
+        if not isinstance(snapshots, list):
+            return []
+        return [s['name'].strip() for s in snapshots
+                if isinstance(s, dict) and isinstance(s.get('name'), str) and s['name'].strip()]
+    return []
+
+
 def write_bundle_metadata(bundlepath, patch_id, revision):
     with open(os.path.join(bundlepath, BUNDLE_METADATA_FILE), 'w', encoding='utf-8') as fh:
         json.dump({'id': int(patch_id), 'revision': str(revision)}, fh, ensure_ascii=False, indent=4)

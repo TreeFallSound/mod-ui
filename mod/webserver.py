@@ -55,7 +55,7 @@ from mod import (
     get_hardware_descriptor, get_unique_name, symbolify,
 )
 from mod.bank import list_banks, save_banks, remove_pedalboard_from_banks
-from mod.patchstorage_share import PatchstorageClient, PatchstorageError, bump_revision, read_bundle_metadata
+from mod.patchstorage_share import PatchstorageClient, PatchstorageError, bump_revision, read_bundle_metadata, read_snapshot_names
 from mod.sfzbuilder import (
     AUDIO_EXTENSIONS, SIDECAR_NAME,
     sanitize_filename, unique_filename, list_banks as sfz_list_banks,
@@ -1873,6 +1873,7 @@ class PatchstorageShareInfo(JsonRequestHandler):
             'auth': PATCHSTORAGE_CLIENT.status(),
             'title': info.get('title') or os.path.splitext(os.path.basename(bundlepath))[0],
             'plugins': plugins,
+            'snapshots': read_snapshot_names(bundlepath),
             'default_tags': [t.strip() for t in PATCHSTORAGE_SHARE_DEFAULT_TAGS.split(',') if t.strip()],
             'has_screenshot': os.path.isfile(os.path.join(bundlepath, 'screenshot.png')),
             'patch': None,
