@@ -11,6 +11,7 @@ import subprocess
 import sys
 import time
 import tarfile
+import zipfile
 
 try:
     sys.modules['tornado'] = __import__('tornado')
@@ -18,6 +19,7 @@ except ModuleNotFoundError:
     pass
 
 from base64 import b64decode, b64encode
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from random import randint
 from signal import signal, SIGUSR1, SIGUSR2
@@ -41,7 +43,10 @@ from mod.settings import (APP, LOG, DEV_API,
                           DEFAULT_PEDALBOARD, DEFAULT_SNAPSHOT_NAME, DATA_DIR, KEYS_PATH, USER_FILES_DIR, RECORDINGS_DIR,
                           FAVORITES_JSON_FILE, PREFERENCES_JSON_FILE, USER_ID_JSON_FILE,
                           DEV_HOST, UNTITLED_PEDALBOARD_NAME, MODEL_CPU, MODEL_TYPE, PEDALBOARDS_LABS_HTTP_ADDRESS,
-                          PATCHSTORAGE_ENABLED, PATCHSTORAGE_API_URL, PATCHSTORAGE_PLATFORM_ID, PATCHSTORAGE_TARGET_ID, BLOKAS_ENABLED,
+                          PATCHSTORAGE_ENABLED, PATCHSTORAGE_API_URL, PATCHSTORAGE_PLATFORM_ID, PATCHSTORAGE_TARGET_ID,
+                          PATCHSTORAGE_PEDALBOARD_PLATFORM_ID, PATCHSTORAGE_PEDALBOARD_TAG_ID,
+                          PATCHSTORAGE_AUTH_FILE, PATCHSTORAGE_SHARE_CATEGORY_ID, PATCHSTORAGE_SHARE_DEFAULT_TAGS,
+                          BLOKAS_ENABLED,
                           BLOKAS_APT_PACKAGE, BLOKAS_UPDATE_CHECK_URL)
 
 from mod import (
@@ -50,6 +55,7 @@ from mod import (
     get_hardware_descriptor, get_unique_name, symbolify,
 )
 from mod.bank import list_banks, save_banks, remove_pedalboard_from_banks
+from mod.patchstorage_share import PatchstorageClient, PatchstorageError, bump_revision, read_bundle_metadata, read_snapshot_names
 from mod.sfzbuilder import (
     AUDIO_EXTENSIONS, SIDECAR_NAME,
     sanitize_filename, unique_filename, list_banks as sfz_list_banks,
@@ -251,6 +257,120 @@ def reset_get_all_pedalboards_cache_with_refresh(ptype):
     reset_get_all_pedalboards_cache(ptype)
     IOLoop.instance().add_callback(_reset_get_all_pedalboards_cache_with_refresh_2)
 
+def _read_pedalboard_patchstorage(bundlepath):
+    if not bundlepath:
+        return None
+    path = os.path.join(bundlepath, 'patchstorage.json')
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, 'r', encoding='utf-8') as fh:
+            data = json.load(fh)
+        if isinstance(data, dict) and 'id' in data:
+            return data
+    except Exception as e:
+        logging.warning('Failed to read pedalboard patchstorage.json: %s', e)
+    return None
+
+def _install_pedalboard_zip(filename, options, callback):
+    """Extract a pedalboard zip into LV2_PEDALBOARDS_DIR and stamp patchstorage.json."""
+    extract_dir = os.path.join(DOWNLOAD_TMP_DIR, 'pb-install-' + str(uuid4()))
+    os.makedirs(extract_dir, exist_ok=True)
+
+    try:
+        with zipfile.ZipFile(filename, 'r') as zf:
+            zf.extractall(extract_dir)
+    except zipfile.BadZipFile as e:
+        logging.warning('Bad pedalboard zip: %s', e)
+        shutil.rmtree(extract_dir, ignore_errors=True)
+        if os.path.exists(filename):
+            os.remove(filename)
+        callback({'ok': False, 'error': 'Invalid pedalboard zip file'})
+        return
+
+    # Find the .pedalboard directory (may be nested one level)
+    src_bundle = None
+    for root, dirs, files in os.walk(extract_dir):
+        for d in dirs:
+            if d.endswith('.pedalboard'):
+                src_bundle = os.path.join(root, d)
+                break
+        if src_bundle:
+            break
+
+    if src_bundle is None:
+        # fallback: single top-level dir with manifest.ttl
+        entries = [e for e in os.listdir(extract_dir) if not e.startswith('.')]
+        if len(entries) == 1:
+            candidate = os.path.join(extract_dir, entries[0])
+            if os.path.isdir(candidate) and os.path.isfile(os.path.join(candidate, 'manifest.ttl')):
+                src_bundle = candidate
+
+    if src_bundle is None or not os.path.isdir(src_bundle):
+        shutil.rmtree(extract_dir, ignore_errors=True)
+        if os.path.exists(filename):
+            os.remove(filename)
+        callback({'ok': False, 'error': 'No pedalboard found in zip'})
+        return
+
+    if not os.path.exists(LV2_PEDALBOARDS_DIR):
+        os.makedirs(LV2_PEDALBOARDS_DIR)
+
+    bundlename = os.path.basename(src_bundle)
+    if not bundlename.endswith('.pedalboard'):
+        bundlename = bundlename + '.pedalboard'
+
+    dest_bundle = os.path.join(LV2_PEDALBOARDS_DIR, bundlename)
+
+    # If updating an existing Patchstorage install, replace that bundle
+    psid = options.get('psid')
+    if psid is not None:
+        for pedal in get_all_pedalboards(kPedalboardInfoUserOnly):
+            ps = _read_pedalboard_patchstorage(pedal.get('bundle'))
+            if ps and str(ps.get('id')) == str(psid):
+                dest_bundle = pedal['bundle']
+                break
+
+    if os.path.exists(dest_bundle):
+        # avoid clobbering unrelated local pedalboards with the same folder name
+        existing_ps = _read_pedalboard_patchstorage(dest_bundle)
+        if existing_ps is None or (psid is not None and str(existing_ps.get('id')) != str(psid)):
+            titlesym = symbolify(os.path.splitext(bundlename)[0])[:16]
+            dest_bundle = os.path.join(LV2_PEDALBOARDS_DIR, "%s.pedalboard" % titlesym)
+            while os.path.exists(dest_bundle):
+                dest_bundle = os.path.join(LV2_PEDALBOARDS_DIR, "%s-%i.pedalboard" % (titlesym, randint(1, 99999)))
+        else:
+            shutil.rmtree(dest_bundle)
+
+    shutil.move(src_bundle, dest_bundle)
+
+    if psid is not None:
+        psversion = options.get('psversion', '0.0')
+        config = {'id': int(psid), 'revision': str(psversion)}
+        json_path = os.path.join(dest_bundle, 'patchstorage.json')
+        with open(json_path, 'w', encoding='utf-8') as fh:
+            json.dump(config, fh, ensure_ascii=False, indent=4)
+
+    # Prefer thumbnail.png; fall back to copying screenshot if present
+    thumb = os.path.join(dest_bundle, 'thumbnail.png')
+    shot = os.path.join(dest_bundle, 'screenshot.png')
+    if not os.path.isfile(thumb) and os.path.isfile(shot):
+        try:
+            shutil.copyfile(shot, thumb)
+        except Exception:
+            pass
+
+    shutil.rmtree(extract_dir, ignore_errors=True)
+    if os.path.exists(filename):
+        os.remove(filename)
+
+    reset_get_all_pedalboards_cache_with_refresh(kPedalboardInfoUserOnly)
+    callback({
+        'ok': True,
+        'bundle': dest_bundle,
+        'bundles': [dest_bundle],
+    })
+
 class TimelessRequestHandler(web.RequestHandler):
     def compute_etag(self):
         return None
@@ -260,6 +380,24 @@ class TimelessRequestHandler(web.RequestHandler):
 
     def should_return_304(self):
         return False
+
+def _html_fingerprint():
+    """
+    Newest modification time under HTML_DIR, in hex. Static files are cached for a year and
+    keyed on "?v=", so this makes the key change whenever the web files do, not only with a
+    new OS image.
+    """
+    newest = 0
+    for root, dirs, files in os.walk(HTML_DIR):
+        dirs[:] = [d for d in dirs if not d.startswith('.') and d != 'node_modules']
+        for name in files:
+            try:
+                newest = max(newest, os.path.getmtime(os.path.join(root, name)))
+            except OSError:
+                pass
+    return '%x' % int(newest)
+
+HTML_FINGERPRINT = _html_fingerprint()
 
 class TimelessStaticFileHandler(web.StaticFileHandler):
     def compute_etag(self):
@@ -1507,6 +1645,10 @@ class PedalboardList(JsonRequestHandler):
         if default_pb:
             default_pb['title'] = "Default"
             default_pb['broken'] = False
+        for pedal in allpedals:
+            ps = _read_pedalboard_patchstorage(pedal.get('bundle'))
+            if ps:
+                pedal['patchstorage'] = ps
         self.write(allpedals)
 
 class PedalboardCurrent(JsonRequestHandler):
@@ -1638,6 +1780,175 @@ class PedalboardLoadWeb(SimpleFileReceiver):
 
         os.remove(filename)
         callback()
+
+class PedalboardInstaller(SimpleFileReceiver):
+    destination_dir = DOWNLOAD_TMP_DIR
+
+    @web.asynchronous
+    @gen.engine
+    def process_file(self, basename, headers, callback=lambda:None):
+        options = {}
+
+        psids = self.request.headers.get_list("Patchstorage-Item")
+        if psids and len(psids) > 0:
+            options["psid"] = psids[0]
+
+        psvers = self.request.headers.get_list("Patchstorage-Item-Version")
+        if psvers and len(psvers) > 0:
+            options["psversion"] = psvers[0]
+
+        def on_finish(resp):
+            self.result = resp
+            callback()
+
+        _install_pedalboard_zip(os.path.join(DOWNLOAD_TMP_DIR, basename), options, on_finish)
+
+PATCHSTORAGE_EXECUTOR = ThreadPoolExecutor(max_workers=2)
+PATCHSTORAGE_CLIENT = PatchstorageClient(
+    re.sub(r'/patches/?$', '', PATCHSTORAGE_API_URL),
+    PATCHSTORAGE_AUTH_FILE,
+    PATCHSTORAGE_PEDALBOARD_PLATFORM_ID,
+    PATCHSTORAGE_SHARE_CATEGORY_ID,
+    'pi-Stomp mod-ui/%s' % (IMAGE_VERSION or 'dev'),
+)
+
+def _shareable_bundle(bundlepath):
+    """Only user pedalboards can be shared; returns the real path or None."""
+    userdir = os.path.realpath(LV2_PEDALBOARDS_DIR)
+    bundlepath = os.path.realpath(bundlepath)
+    if not bundlepath.startswith(userdir + os.sep) or not os.path.isfile(os.path.join(bundlepath, 'manifest.ttl')):
+        return None
+    return bundlepath
+
+class PatchstorageAuth(JsonRequestHandler):
+    def get(self):
+        self.write(PATCHSTORAGE_CLIENT.status())
+
+class PatchstorageLogin(JsonRequestHandler):
+    @gen.coroutine
+    def post(self):
+        username = self.get_argument('username', '').strip()
+        password = self.get_argument('password', '')
+        if not username or not password:
+            self.write({'ok': False, 'error': 'Enter your Patchstorage username and password'})
+            return
+        try:
+            status = yield PATCHSTORAGE_EXECUTOR.submit(PATCHSTORAGE_CLIENT.login, username, password)
+        except PatchstorageError as e:
+            self.write({'ok': False, 'error': e.message})
+            return
+        status['ok'] = True
+        self.write(status)
+
+class PatchstorageLogout(JsonRequestHandler):
+    def post(self):
+        PATCHSTORAGE_CLIENT.logout()
+        self.write({'ok': True})
+
+class PatchstorageShareInfo(JsonRequestHandler):
+    @gen.coroutine
+    def get(self):
+        bundlepath = _shareable_bundle(self.get_argument('bundlepath'))
+        if bundlepath is None:
+            self.write({'ok': False, 'error': 'Only your own saved pedalboards can be shared'})
+            return
+
+        try:
+            info = get_pedalboard_info(bundlepath)
+        except Exception:
+            self.write({'ok': False, 'error': 'Cannot read this pedalboard'})
+            return
+
+        plugins = []
+        for plugin in info.get('plugins', []):
+            try:
+                name = get_plugin_info(plugin['uri'])['name']
+            except Exception:
+                name = plugin['uri']
+            if name not in plugins:
+                plugins.append(name)
+
+        resp = {
+            'ok': True,
+            'auth': PATCHSTORAGE_CLIENT.status(),
+            'title': info.get('title') or os.path.splitext(os.path.basename(bundlepath))[0],
+            'plugins': plugins,
+            'snapshots': read_snapshot_names(bundlepath),
+            'default_tags': [t.strip() for t in PATCHSTORAGE_SHARE_DEFAULT_TAGS.split(',') if t.strip()],
+            'has_screenshot': os.path.isfile(os.path.join(bundlepath, 'screenshot.png')),
+            'patch': None,
+        }
+
+        meta = read_bundle_metadata(bundlepath)
+        if meta is not None:
+            try:
+                patch = yield PATCHSTORAGE_EXECUTOR.submit(PATCHSTORAGE_CLIENT.get_patch, meta['id'])
+            except PatchstorageError as e:
+                logging.warning('[patchstorage] pedalboard %s points at patch %s: %s', bundlepath, meta['id'], e.message)
+                patch = None
+            if patch and patch.get('id'):
+                resp['patch'] = {
+                    'id': patch['id'],
+                    'url': patch.get('url'),
+                    'title': patch.get('title'),
+                    'content': patch.get('content'),
+                    'revision': patch.get('revision'),
+                    'next_revision': bump_revision(patch.get('revision')),
+                    'tags': [t['name'] for t in patch.get('tags') or []],
+                    'preview_url': patch.get('preview_url') or '',
+                    'license': (patch.get('license') or {}).get('id'),
+                    'state': (patch.get('state') or {}).get('id'),
+                    'author': (patch.get('author') or {}).get('name'),
+                    'owned': PATCHSTORAGE_CLIENT.owns(patch),
+                }
+
+        self.write(resp)
+
+class PatchstorageShare(JsonRequestHandler):
+    @gen.coroutine
+    def post(self):
+        bundlepath = _shareable_bundle(self.get_argument('bundlepath'))
+        if bundlepath is None:
+            self.write({'ok': False, 'error': 'Only your own saved pedalboards can be shared'})
+            return
+
+        if self.get_argument('confirm', '') != '1':
+            self.write({'ok': False, 'error': 'Please confirm that you have the rights to share this content'})
+            return
+
+        patch_id = None
+        if self.get_argument('mode', 'new') == 'update':
+            meta = read_bundle_metadata(bundlepath)
+            if meta is None:
+                self.write({'ok': False, 'error': 'This pedalboard has not been shared before'})
+                return
+            patch_id = int(meta['id'])
+
+        fields = {
+            'title': self.get_argument('title', ''),
+            'content': self.get_argument('content', ''),
+            'revision': self.get_argument('revision', ''),
+            'tags': self.get_argument('tags', '').split(','),
+            'preview_url': self.get_argument('preview_url', ''),
+            'license': self.get_argument('license', None),
+            'state': self.get_argument('state', None),
+        }
+        artwork = self.request.files.get('artwork')
+        artwork = artwork[0]['body'] if artwork else None
+
+        try:
+            result = yield PATCHSTORAGE_EXECUTOR.submit(PATCHSTORAGE_CLIENT.share, bundlepath, fields, patch_id, artwork)
+        except PatchstorageError as e:
+            self.write({'ok': False, 'error': e.message, 'auth_required': e.auth_required})
+            return
+        except Exception as e:
+            logging.exception('[patchstorage] share failed')
+            self.write({'ok': False, 'error': 'Sharing failed: %s' % e})
+            return
+
+        reset_get_all_pedalboards_cache_with_refresh(kPedalboardInfoUserOnly)
+        result['ok'] = True
+        self.write(result)
 
 class PedalboardFactoryCopy(JsonRequestHandler):
     def get(self):
@@ -1936,8 +2247,14 @@ class TemplateHandler(TimelessRequestHandler):
         if IMAGE_VERSION is not None and len(IMAGE_VERSION) > 1:
             # strip initial 'v' from version if present
             version = IMAGE_VERSION[1:] if IMAGE_VERSION[0] == "v" else IMAGE_VERSION
-            return url_escape(version)
+            return url_escape('%s-%s' % (version, HTML_FINGERPRINT))
         return str(int(time.time()))
+
+    def get_image_version(self):
+        # "?v=" without the HTML_FINGERPRINT suffix; pages expose it as VERSION
+        version = self.get_argument('v')
+        suffix = '-' + HTML_FINGERPRINT
+        return version[:-len(suffix)] if version.endswith(suffix) else version
 
     def index(self):
         user_id = safe_json_load(USER_ID_JSON_FILE, dict)
@@ -1969,6 +2286,7 @@ class TemplateHandler(TimelessRequestHandler):
             'controlchain_url': CONTROLCHAIN_HTTP_ADDRESS,
             'hardware_profile': b64encode(json.dumps(SESSION.get_hardware_actuators()).encode("utf-8")),
             'version': self.get_argument('v'),
+            'image_version': self.get_image_version(),
             'bin_compat': hwdesc.get('bin-compat', "Unknown"),
             'codec_truebypass': 'true' if hwdesc.get('codec_truebypass', False) else 'false',
             'factory_pedalboards': hwdesc.get('factory_pedalboards', False),
@@ -1993,6 +2311,8 @@ class TemplateHandler(TimelessRequestHandler):
             'patchstorage_api_url': PATCHSTORAGE_API_URL,
             'patchstorage_platform_id': PATCHSTORAGE_PLATFORM_ID,
             'patchstorage_target_id': PATCHSTORAGE_TARGET_ID,
+            'patchstorage_pedalboard_platform_id': PATCHSTORAGE_PEDALBOARD_PLATFORM_ID,
+            'patchstorage_pedalboard_tag_id': PATCHSTORAGE_PEDALBOARD_TAG_ID,
             'blokas_enabled': 'true' if BLOKAS_ENABLED else 'false'
         }
         return context
@@ -2030,6 +2350,7 @@ class TemplateHandler(TimelessRequestHandler):
     def allguis(self):
         context = {
             'version': self.get_argument('v'),
+            'image_version': self.get_image_version(),
         }
         return context
 
@@ -2041,6 +2362,7 @@ class TemplateHandler(TimelessRequestHandler):
             'cloud_url': CLOUD_HTTP_ADDRESS,
             'controlchain_url': CONTROLCHAIN_HTTP_ADDRESS,
             'version': self.get_argument('v'),
+            'image_version': self.get_image_version(),
             'hmi_eeprom': 'true' if hwdesc.get('hmi_eeprom', False) else 'false',
             'preferences': json.dumps(prefs),
             'bufferSize': get_jack_buffer_size(),
@@ -2598,7 +2920,14 @@ settings = {'log_function': lambda handler: None} if not LOG else {}
 
 application = web.Application(
         EffectInstaller.urls('effect/install') +
+        PedalboardInstaller.urls('pedalboard/install') +
         [
+            (r"/patchstorage/auth", PatchstorageAuth),
+            (r"/patchstorage/login", PatchstorageLogin),
+            (r"/patchstorage/logout", PatchstorageLogout),
+            (r"/patchstorage/share/info", PatchstorageShareInfo),
+            (r"/patchstorage/share", PatchstorageShare),
+
             (r"/system/info", SystemInfo),
             (r"/system/prefs", SystemPreferences),
             (r"/system/exechange", SystemExeChange),

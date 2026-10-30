@@ -31,6 +31,7 @@
 
 <link rel="stylesheet" type="text/css" href="css/fontello/css/fontello.css?v={{version}}"/>
 <link rel="stylesheet" type="text/css" href="css/main.css?v={{version}}"/>
+<link rel="stylesheet" type="text/css" href="css/patchstorage-pedalboards.css?v={{version}}"/>
 <link rel="stylesheet" type="text/css" href="css/dashboard.css?v={{version}}"/>
 <link rel="stylesheet" type="text/css" href="css/fonts.css?v={{version}}"/>
 <link rel="stylesheet" type="text/css" href="img/icons/icons.css?v={{version}}"/>
@@ -70,13 +71,15 @@
     PATCHSTORAGE_API_URL = '{{patchstorage_api_url}}'
     PATCHSTORAGE_PLATFORM_ID = '{{patchstorage_platform_id}}'
     PATCHSTORAGE_TARGET_ID = '{{patchstorage_target_id}}'
+    PATCHSTORAGE_PEDALBOARD_PLATFORM_ID = '{{patchstorage_pedalboard_platform_id}}'
+    PATCHSTORAGE_PEDALBOARD_TAG_ID = '{{patchstorage_pedalboard_tag_id}}'
     BLOKAS_ENABLED = '{{blokas_enabled}}'
     PLUGINS_URL      = '{{plugins_url}}'
     PEDALBOARDS_URL  = '{{pedalboards_url}}'
     PEDALBOARDS_LABS_URL  = '{{pedalboards_labs_url}}'
     CONTROLCHAIN_URL = '{{controlchain_url}}'
     LV2_PLUGIN_DIR   = '{{lv2_plugin_dir}}'
-    VERSION          = '{{version}}'
+    VERSION          = '{{image_version}}'
     BIN_COMPAT       = '{{bin_compat}}'
     PLATFORM         = '{{platform}}'
     var SAMPLERATE   = {{sampleRate}}
@@ -138,7 +141,10 @@ $('document').ready(function() {
         cloudPluginBox: $('#cloud-plugins-library'),
         cloudPluginBoxTrigger: $('#mod-cloud-plugins'),
         patchstorageBox: $('#patchstorage-library'),
-        patchstorageBoxTrigger: $('#patchstorage'),
+        patchstorageBoxTrigger: $('#main-menu #patchstorage'),
+        patchstorageHub: $('#patchstorage-hub'),
+        patchstoragePedalboardsBox: $('#patchstorage-pedalboards-library'),
+        patchstorageShareWindow: $('#patchstorage-share-window'),
         pedalboardBox: $('#pedalboards-library'),
         pedalboardBoxTrigger: $('#main-menu #mod-pedalboard'),
         bankBox: $('#bank-library'),
@@ -197,7 +203,9 @@ $('document').ready(function() {
         $('#mod-bypassLeft').hide()
         $('#mod-bypassRight').hide()
         $('#mod-update').hide()
-        $('#pedalboard-info').find('.js-cloud').hide()
+        if (!{{patchstorage_enabled}}) {
+            $('#pedalboard-info').find('.js-cloud').hide()
+        }
 
         // show other stuff to make it less empty
         $('#mod-xruns').show()
@@ -377,6 +385,8 @@ $('document').ready(function() {
 <script type="text/javascript" src="js/effects.js?v={{version}}"></script>
 <script type="text/javascript" src="js/cloudplugin.js?v={{version}}"></script>
 <script type="text/javascript" src="js/patchstorage.js?v={{version}}"></script>
+<script type="text/javascript" src="js/patchstorage_pedalboards.js?v={{version}}"></script>
+<script type="text/javascript" src="js/patchstorage_share.js?v={{version}}"></script>
 <script type="text/javascript" src="js/mididevices.js?v={{version}}"></script>
 <script type="text/javascript" src="js/snapshot.js?v={{version}}"></script>
 <script type="text/javascript" src="js/hardware.js?v={{version}}"></script>
@@ -918,11 +928,41 @@ $('document').ready(function() {
     </div>
     <!-- END CLOUD PLUGINS LIBRARY -->
 
+    <!-- PATCHSTORAGE HUB (asset type selection) -->
+    <div id="patchstorage-hub" class="mod-hidden mod-init-hidden">
+        <div>
+            <header>
+                <h1 class="bottom top">PATCHSTORAGE</h1>
+            </header>
+            <div class="ps-hub-content">
+                <p class="ps-hub-intro">Choose an asset type to browse and install from Patchstorage.</p>
+                <div class="ps-hub-assets">
+                    <button type="button" class="ps-hub-asset" data-asset="plugins">
+                        <span class="ps-hub-icon ps-hub-icon-plugins">P</span>
+                        <span class="ps-hub-text">
+                            <span class="ps-hub-label">Plugins</span>
+                            <span class="ps-hub-desc">LV2 plugins available on Patchstorage</span>
+                        </span>
+                    </button>
+                    <button type="button" class="ps-hub-asset" data-asset="pedalboards">
+                        <span class="ps-hub-icon ps-hub-icon-pedalboards">P</span>
+                        <span class="ps-hub-text">
+                            <span class="ps-hub-label">Pedalboards</span>
+                            <span class="ps-hub-desc">Pedalboards available on Patchstorage</span>
+                        </span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- END PATCHSTORAGE HUB -->
+
     <!-- PATCHSTORAGE -->
     <div id="patchstorage-library" class="mod-hidden mod-init-hidden">
         <div>
             <header>
-                <h1 class="bottom top">PATCHSTORAGE (Beta)</h1>
+                <button type="button" class="js-ps-back ps-back-btn" title="Back to Patchstorage">Back</button>
+                <h1 class="bottom top">PATCHSTORAGE PLUGINS</h1>
                 <button class="status icon mod-bypass" id="patchstorage_update_all">Refresh</button>
             </header>
 
@@ -992,6 +1032,124 @@ $('document').ready(function() {
         </div>
     </div>
     <!-- END PATCHSTORAGE -->
+
+    <!-- PATCHSTORAGE PEDALBOARDS -->
+    <div id="patchstorage-pedalboards-library" class="mod-hidden mod-init-hidden">
+        <div>
+            <header>
+                <button type="button" class="js-ps-back ps-back-btn" title="Back to Patchstorage">Back</button>
+                <h1 class="bottom top">PATCHSTORAGE PEDALBOARDS</h1>
+                <button class="status icon mod-bypass" id="patchstorage_pedalboards_update_all">Refresh</button>
+            </header>
+
+            <div class="filter clearfix">
+                <h2>Filter</h2>
+                <div class="control-group">
+                    <input type="checkbox" name="non-installed" id="patchstorage-pb-non-installed" />
+                    <label for="patchstorage-pb-non-installed">NOT INSTALLED</label>
+                </div>
+                <div class="control-group">
+                    <input type="checkbox" name="installed" id="patchstorage-pb-installed" />
+                    <label for="patchstorage-pb-installed">INSTALLED</label>
+                </div>
+                <div class="control-group">
+                    <input type="checkbox" name="outdated" id="patchstorage-pb-outdated"/>
+                    <label for="patchstorage-pb-outdated">OUTDATED</label>
+                </div>
+                <div class="">
+                    <input class="form-control" placeholder="Filter by keyword" type="search" autocomplete="off" />
+                </div>
+                <ul class="categories list list-unstyled" style="margin-bottom: 0px;">
+                    <li id="patchstorage-pedalboards-tab-All" class="selected">All</li>
+                </ul>
+            </div>
+
+            <div class="patchstorage-plugins clearfix js-patchstorage-pedalboards">
+              <div id="patchstorage-pedalboards-results-wrapper">
+                    <h2>Filtered results</h2>
+                    <div id="patch-pedalboard-content-All" class="plugins-wrapper"></div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+    <!-- END PATCHSTORAGE PEDALBOARDS -->
+
+    <!-- PATCHSTORAGE SHARE WINDOW -->
+    <div id="patchstorage-share-window" class="mod-hidden" tabindex="-1">
+        <div class="ps-share-box">
+            <span class="js-close close">&times;</span>
+            <h1>Share on Patchstorage</h1>
+
+            <div class="ps-share-step js-step-loading">
+                <p class="js-message"></p>
+            </div>
+
+            <form class="ps-share-step js-step-login" autocomplete="on">
+                <p>Log in with your <a href="https://patchstorage.com/" target="_blank">patchstorage.com</a> account.
+                   The pi-Stomp keeps a login token for 7 days, never your password.</p>
+                <label>Username or e-mail <input type="text" name="username" autocomplete="username"/></label>
+                <label>Password <input type="password" name="password" autocomplete="current-password"/></label>
+                <p class="ps-share-error js-error"></p>
+                <div class="ps-share-actions">
+                    <button type="button" class="js-close btn btn-danger">Cancel</button>
+                    <button type="submit" class="btn btn-success">Log in</button>
+                </div>
+            </form>
+
+            <form class="ps-share-step js-step-form">
+                <p class="ps-share-account">Logged in as <b class="js-username"></b> &middot; <a href="#" class="js-logout">Log out</a></p>
+                <div class="ps-share-mode js-mode">
+                    <label><input type="radio" name="mode" value="update"/>
+                        Publish a new revision of <a class="js-patch-link" target="_blank"></a>
+                        (now <span class="js-current-revision"></span>)</label>
+                    <label><input type="radio" name="mode" value="new"/> Share as a new pedalboard</label>
+                </div>
+                <p class="ps-share-note js-not-owned">This pedalboard came from <b class="js-author"></b> on Patchstorage,
+                   so it will be shared as a new pedalboard under your name.</p>
+                <label>Title * <input type="text" name="title" maxlength="100"/></label>
+                <label>Description * <textarea name="content" rows="5"></textarea></label>
+                <div class="ps-share-row">
+                    <label>Revision * <input type="text" name="revision" maxlength="20"/></label>
+                    <label>State * <select name="state"></select></label>
+                </div>
+                <label>Tags * <small>(comma separated)</small> <input type="text" name="tags"/></label>
+                <label>License * <select name="license"></select></label>
+                <label>Preview URL <small class="js-preview-hint"></small>
+                    <input type="text" name="preview_url" maxlength="500"
+                           placeholder="A YouTube, Vimeo or SoundCloud link to a demo"/></label>
+                <!-- only shown when the pedalboard has no screenshot.png to use as artwork -->
+                <div class="ps-share-artwork js-artwork">
+                    <img class="js-artwork-preview" alt=""/>
+                    <div>
+                        <span>Artwork *</span>
+                        <small class="js-artwork-name"></small>
+                        <input type="file" name="artwork" class="mod-hidden"
+                               accept="image/png,image/jpeg,image/gif,image/webp"/>
+                        <button type="button" class="js-artwork-choose btn btn-info btn-mini">Choose image...</button>
+                    </div>
+                </div>
+                <label class="ps-share-confirm"><input type="checkbox" name="confirm" value="1"/>
+                    I confirm that I have the necessary rights to upload and share this content, and that it does
+                    not infringe on any copyrights, trademarks or other third-party rights. *</label>
+                <p class="ps-share-required">* required</p>
+                <p class="ps-share-error js-error"></p>
+                <div class="ps-share-actions">
+                    <button type="button" class="js-close btn btn-danger">Cancel</button>
+                    <button type="submit" class="js-publish btn btn-success">Publish</button>
+                </div>
+            </form>
+
+            <div class="ps-share-step js-step-done">
+                <p>Published revision <b class="js-revision"></b> on Patchstorage.</p>
+                <div class="ps-share-actions">
+                    <a class="js-patch-link btn btn-info" target="_blank">View on Patchstorage</a>
+                    <button type="button" class="js-close btn btn-success">Done</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- END PATCHSTORAGE SHARE WINDOW -->
 
     <!-- PEDALBOARDS LIBRARY -->
     <div id="pedalboards-library" class="mod-hidden mod-init-hidden">

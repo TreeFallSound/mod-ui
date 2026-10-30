@@ -135,7 +135,7 @@
     {% autoescape None %}
     SITEURL          = '{{cloud_url}}'
     CONTROLCHAIN_URL = '{{controlchain_url}}'
-    VERSION          = '{{version}}'
+    VERSION          = '{{image_version}}'
     var TEMPLATES    = {}
     var NOTIFICATIONS_ENABLED = true
     var HMI_EEPROM = {{hmi_eeprom}}
@@ -1240,7 +1240,7 @@ $('document').ready(function() {
                 <form class="form">
                     <b>Unit:</b> <span id="info-system-unit">---</span><br/>
                     <b>Build Date:</b> <span id="info-system-date">---</span><br/>
-                    <b>OS Version:</b> {{version}}<br/>
+                    <b>OS Version:</b> {{image_version}}<br/>
                 </form>
 
                 <hr style="border:1px solid #333;"/>

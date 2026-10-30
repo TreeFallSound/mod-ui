@@ -118,6 +118,13 @@ PATCHSTORAGE_ENABLED=bool(int(os.environ.get('PATCHSTORAGE_ENABLED', True)))
 PATCHSTORAGE_API_URL=os.environ.get('PATCHSTORAGE_API_URL', 'http://localhost/api/beta/patches')
 PATCHSTORAGE_PLATFORM_ID=os.environ.get('PATCHSTORAGE_PLATFORM_ID', 5027)
 PATCHSTORAGE_TARGET_ID=os.environ.get('PATCHSTORAGE_TARGET_ID', 5037)
+# Pedalboards on Patchstorage live on the "pi-Stomp" platform; an optional tag narrows the list further
+PATCHSTORAGE_PEDALBOARD_PLATFORM_ID=os.environ.get('PATCHSTORAGE_PEDALBOARD_PLATFORM_ID', 12520)  # "pi-stomp"
+PATCHSTORAGE_PEDALBOARD_TAG_ID=os.environ.get('PATCHSTORAGE_PEDALBOARD_TAG_ID', '')
+# Sharing pedalboards: login token (never the password) is kept here, mode 0600
+PATCHSTORAGE_AUTH_FILE=os.environ.get('PATCHSTORAGE_AUTH_FILE', join(DATA_DIR, 'patchstorage-auth.json'))
+PATCHSTORAGE_SHARE_CATEGORY_ID=os.environ.get('PATCHSTORAGE_SHARE_CATEGORY_ID', 372)  # "Sound"
+PATCHSTORAGE_SHARE_DEFAULT_TAGS=os.environ.get('PATCHSTORAGE_SHARE_DEFAULT_TAGS', 'pedalboard, pi-stomp')
 BLOKAS_ENABLED=bool(int(os.environ.get('BLOKAS_ENABLED', True)))
 BLOKAS_APT_PACKAGE=os.environ.get('BLOKAS_APT_PACKAGE', 'modep-mod-ui')
 BLOKAS_UPDATE_CHECK_URL=os.environ.get('BLOKAS_UPDATE_CHECK_URL', 'https://blokas.io/modep/version/v1/')
