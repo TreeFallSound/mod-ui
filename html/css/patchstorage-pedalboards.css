@@ -155,3 +155,150 @@
   color: #aaa;
   line-height: 1.35;
 }
+
+/* Share on Patchstorage: above the library windows and the pedalboard info window */
+#patchstorage-share-window {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 3000;
+  background: rgba(0,0,0,.75);
+}
+
+#patchstorage-share-window .ps-share-box {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 460px;
+  max-width: calc(100% - 20px);
+  max-height: calc(100% - 20px);
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding: 18px;
+  background: #2c2c2c;
+  color: #ddd;
+  font-size: 13px;
+}
+
+#patchstorage-share-window h1 {
+  margin: 0 0 14px 0;
+  font-size: 18px;
+  line-height: 1;
+  text-transform: uppercase;
+  color: #fff;
+}
+
+#patchstorage-share-window .close {
+  float: right;
+  color: #fff;
+  opacity: .7;
+  cursor: pointer;
+}
+
+#patchstorage-share-window .ps-share-step {
+  display: none;
+}
+
+#patchstorage-share-window a {
+  color: #36a6db;
+}
+
+#patchstorage-share-window label {
+  display: block;
+  margin: 0 0 10px 0;
+  font-weight: normal;
+  color: #aaa;
+}
+
+#patchstorage-share-window input[type=text],
+#patchstorage-share-window input[type=password],
+#patchstorage-share-window textarea,
+#patchstorage-share-window select {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 3px;
+  padding: 5px 7px;
+  border: 1px solid #555;
+  background: #1c1c1c;
+  color: #fff;
+  font-size: 13px;
+}
+
+#patchstorage-share-window textarea {
+  resize: vertical;
+}
+
+#patchstorage-share-window .ps-share-row {
+  display: flex;
+  gap: 12px;
+}
+
+#patchstorage-share-window .ps-share-row label {
+  flex: 1;
+}
+
+#patchstorage-share-window .ps-share-artwork {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+#patchstorage-share-window .ps-share-artwork img {
+  width: 120px;
+  height: 68px;
+  object-fit: contain;
+  background: #1c1c1c;
+  border: 1px solid #555;
+}
+
+#patchstorage-share-window .ps-share-artwork span,
+#patchstorage-share-window .ps-share-artwork small {
+  display: block;
+  margin-bottom: 4px;
+  color: #aaa;
+}
+
+#patchstorage-share-window .ps-share-mode {
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  background: #1c1c1c;
+}
+
+#patchstorage-share-window .ps-share-mode label {
+  margin: 4px 0;
+  color: #ddd;
+}
+
+#patchstorage-share-window .ps-share-mode input,
+#patchstorage-share-window .ps-share-mode input[type=radio] {
+  display: inline;
+  width: auto;
+  margin: 0 6px 0 0;
+}
+
+#patchstorage-share-window .ps-share-account,
+#patchstorage-share-window .ps-share-note {
+  margin-bottom: 12px;
+}
+
+#patchstorage-share-window .ps-share-note {
+  color: #e8b04c;
+}
+
+#patchstorage-share-window .ps-share-error {
+  min-height: 1em;
+  color: #ff6b6b;
+}
+
+#patchstorage-share-window .ps-share-actions {
+  text-align: right;
+}
+
+#patchstorage-share-window .ps-share-actions .btn {
+  margin-left: 6px;
+}

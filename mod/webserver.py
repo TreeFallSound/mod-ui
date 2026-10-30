@@ -19,6 +19,7 @@ except ModuleNotFoundError:
     pass
 
 from base64 import b64decode, b64encode
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from random import randint
 from signal import signal, SIGUSR1, SIGUSR2
@@ -43,7 +44,9 @@ from mod.settings import (APP, LOG, DEV_API,
                           FAVORITES_JSON_FILE, PREFERENCES_JSON_FILE, USER_ID_JSON_FILE,
                           DEV_HOST, UNTITLED_PEDALBOARD_NAME, MODEL_CPU, MODEL_TYPE, PEDALBOARDS_LABS_HTTP_ADDRESS,
                           PATCHSTORAGE_ENABLED, PATCHSTORAGE_API_URL, PATCHSTORAGE_PLATFORM_ID, PATCHSTORAGE_TARGET_ID,
-                          PATCHSTORAGE_PEDALBOARD_PLATFORM_ID, PATCHSTORAGE_PEDALBOARD_TAG_ID, BLOKAS_ENABLED,
+                          PATCHSTORAGE_PEDALBOARD_PLATFORM_ID, PATCHSTORAGE_PEDALBOARD_TAG_ID,
+                          PATCHSTORAGE_AUTH_FILE, PATCHSTORAGE_SHARE_CATEGORY_ID, PATCHSTORAGE_SHARE_DEFAULT_TAGS,
+                          BLOKAS_ENABLED,
                           BLOKAS_APT_PACKAGE, BLOKAS_UPDATE_CHECK_URL)
 
 from mod import (
@@ -52,6 +55,7 @@ from mod import (
     get_hardware_descriptor, get_unique_name, symbolify,
 )
 from mod.bank import list_banks, save_banks, remove_pedalboard_from_banks
+from mod.patchstorage_share import PatchstorageClient, PatchstorageError, bump_revision, read_bundle_metadata
 from mod.sfzbuilder import (
     AUDIO_EXTENSIONS, SIDECAR_NAME,
     sanitize_filename, unique_filename, list_banks as sfz_list_banks,
@@ -1781,6 +1785,146 @@ class PedalboardInstaller(SimpleFileReceiver):
 
         _install_pedalboard_zip(os.path.join(DOWNLOAD_TMP_DIR, basename), options, on_finish)
 
+PATCHSTORAGE_EXECUTOR = ThreadPoolExecutor(max_workers=2)
+PATCHSTORAGE_CLIENT = PatchstorageClient(
+    re.sub(r'/patches/?$', '', PATCHSTORAGE_API_URL),
+    PATCHSTORAGE_AUTH_FILE,
+    PATCHSTORAGE_PEDALBOARD_PLATFORM_ID,
+    PATCHSTORAGE_SHARE_CATEGORY_ID,
+    'pi-Stomp mod-ui/%s' % (IMAGE_VERSION or 'dev'),
+)
+
+def _shareable_bundle(bundlepath):
+    """Only user pedalboards can be shared; returns the real path or None."""
+    userdir = os.path.realpath(LV2_PEDALBOARDS_DIR)
+    bundlepath = os.path.realpath(bundlepath)
+    if not bundlepath.startswith(userdir + os.sep) or not os.path.isfile(os.path.join(bundlepath, 'manifest.ttl')):
+        return None
+    return bundlepath
+
+class PatchstorageAuth(JsonRequestHandler):
+    def get(self):
+        self.write(PATCHSTORAGE_CLIENT.status())
+
+class PatchstorageLogin(JsonRequestHandler):
+    @gen.coroutine
+    def post(self):
+        username = self.get_argument('username', '').strip()
+        password = self.get_argument('password', '')
+        if not username or not password:
+            self.write({'ok': False, 'error': 'Enter your Patchstorage username and password'})
+            return
+        try:
+            status = yield PATCHSTORAGE_EXECUTOR.submit(PATCHSTORAGE_CLIENT.login, username, password)
+        except PatchstorageError as e:
+            self.write({'ok': False, 'error': e.message})
+            return
+        status['ok'] = True
+        self.write(status)
+
+class PatchstorageLogout(JsonRequestHandler):
+    def post(self):
+        PATCHSTORAGE_CLIENT.logout()
+        self.write({'ok': True})
+
+class PatchstorageShareInfo(JsonRequestHandler):
+    @gen.coroutine
+    def get(self):
+        bundlepath = _shareable_bundle(self.get_argument('bundlepath'))
+        if bundlepath is None:
+            self.write({'ok': False, 'error': 'Only your own saved pedalboards can be shared'})
+            return
+
+        try:
+            info = get_pedalboard_info(bundlepath)
+        except Exception:
+            self.write({'ok': False, 'error': 'Cannot read this pedalboard'})
+            return
+
+        plugins = []
+        for plugin in info.get('plugins', []):
+            try:
+                name = get_plugin_info(plugin['uri'])['name']
+            except Exception:
+                name = plugin['uri']
+            if name not in plugins:
+                plugins.append(name)
+
+        resp = {
+            'ok': True,
+            'auth': PATCHSTORAGE_CLIENT.status(),
+            'title': info.get('title') or os.path.splitext(os.path.basename(bundlepath))[0],
+            'plugins': plugins,
+            'default_tags': [t.strip() for t in PATCHSTORAGE_SHARE_DEFAULT_TAGS.split(',') if t.strip()],
+            'has_screenshot': os.path.isfile(os.path.join(bundlepath, 'screenshot.png')),
+            'patch': None,
+        }
+
+        meta = read_bundle_metadata(bundlepath)
+        if meta is not None:
+            try:
+                patch = yield PATCHSTORAGE_EXECUTOR.submit(PATCHSTORAGE_CLIENT.get_patch, meta['id'])
+            except PatchstorageError as e:
+                logging.warning('[patchstorage] pedalboard %s points at patch %s: %s', bundlepath, meta['id'], e.message)
+                patch = None
+            if patch and patch.get('id'):
+                resp['patch'] = {
+                    'id': patch['id'],
+                    'url': patch.get('url'),
+                    'title': patch.get('title'),
+                    'content': patch.get('content'),
+                    'revision': patch.get('revision'),
+                    'next_revision': bump_revision(patch.get('revision')),
+                    'tags': [t['name'] for t in patch.get('tags') or []],
+                    'license': (patch.get('license') or {}).get('id'),
+                    'state': (patch.get('state') or {}).get('id'),
+                    'author': (patch.get('author') or {}).get('name'),
+                    'owned': PATCHSTORAGE_CLIENT.owns(patch),
+                }
+
+        self.write(resp)
+
+class PatchstorageShare(JsonRequestHandler):
+    @gen.coroutine
+    def post(self):
+        bundlepath = _shareable_bundle(self.get_argument('bundlepath'))
+        if bundlepath is None:
+            self.write({'ok': False, 'error': 'Only your own saved pedalboards can be shared'})
+            return
+
+        patch_id = None
+        if self.get_argument('mode', 'new') == 'update':
+            meta = read_bundle_metadata(bundlepath)
+            if meta is None:
+                self.write({'ok': False, 'error': 'This pedalboard has not been shared before'})
+                return
+            patch_id = int(meta['id'])
+
+        fields = {
+            'title': self.get_argument('title', ''),
+            'content': self.get_argument('content', ''),
+            'revision': self.get_argument('revision', ''),
+            'tags': self.get_argument('tags', '').split(','),
+            'license': self.get_argument('license', None),
+            'state': self.get_argument('state', None),
+        }
+        artwork = self.request.files.get('artwork')
+        artwork = artwork[0]['body'] if artwork else None
+
+        try:
+            result = yield PATCHSTORAGE_EXECUTOR.submit(PATCHSTORAGE_CLIENT.share, bundlepath, fields, patch_id, artwork)
+        except PatchstorageError as e:
+            self.write({'ok': False, 'error': e.message, 'auth_required': e.auth_required})
+            return
+        except Exception as e:
+            logging.exception('[patchstorage] share failed')
+            self.write({'ok': False, 'error': 'Sharing failed: %s' % e})
+            return
+
+        reset_get_all_pedalboards_cache_with_refresh(kPedalboardInfoUserOnly)
+        result['ok'] = True
+        self.write(result)
+
 class PedalboardFactoryCopy(JsonRequestHandler):
     def get(self):
         bundlepath = os.path.abspath(self.get_argument('bundlepath'))
@@ -2744,6 +2888,12 @@ application = web.Application(
         EffectInstaller.urls('effect/install') +
         PedalboardInstaller.urls('pedalboard/install') +
         [
+            (r"/patchstorage/auth", PatchstorageAuth),
+            (r"/patchstorage/login", PatchstorageLogin),
+            (r"/patchstorage/logout", PatchstorageLogout),
+            (r"/patchstorage/share/info", PatchstorageShareInfo),
+            (r"/patchstorage/share", PatchstorageShare),
+
             (r"/system/info", SystemInfo),
             (r"/system/prefs", SystemPreferences),
             (r"/system/exechange", SystemExeChange),

@@ -38,6 +38,7 @@ function Desktop(elements) {
         patchstorageBoxTrigger: $('<div>'),
         patchstorageHub: $('<div>'),
         patchstoragePedalboardsBox: $('<div>'),
+        patchstorageShareWindow: $('<div>'),
         pedalboardTrigger: $('<div>'),
         fileManagerBox: $('<div>'),
         fileManagerBoxTrigger: $('<div>'),
@@ -741,6 +742,7 @@ function Desktop(elements) {
     this.patchstoragePedalboardsBox = self.makePatchstoragePedalboardsBox(
                                                   elements.patchstoragePedalboardsBox,
                                                   elements.patchstorageBoxTrigger)
+    this.patchstorageShareWindow = elements.patchstorageShareWindow.patchstorageShareBox()
     this.pedalboardBox = self.makePedalboardBox(elements.pedalboardBox,
                                                 elements.pedalboardBoxTrigger)
     this.bankBox = self.makeBankBox(elements.bankBox,
@@ -1171,9 +1173,7 @@ function Desktop(elements) {
                 return new Notification('warn', 'No plugins loaded, cannot share', 1500)
             }
 
-            self.validatePlugins(uris, function (stable) {
-                elements.shareWindow.shareBox('open', self.pedalboardBundle, self.title, stable)
-            })
+            self.sharePedalboardOnPatchstorage(self.pedalboardBundle)
         }
 
         if (self.pedalboardModified || ! (self.pedalboardEmpty || self.pedalboardBundle)) {
@@ -1827,6 +1827,19 @@ Desktop.prototype.makePatchstorageBox = function (el, menuTrigger) {
     return box
 }
 
+Desktop.prototype.sharePedalboardOnPatchstorage = function (bundlepath, callback) {
+    var self = this
+    self.patchstorageShareWindow.patchstorageShareBox('open', bundlepath, function (result) {
+        self.previousPedalboardList = null
+        self.patchstoragePedalboardsBox.data('localPedalboards', null)
+        self.patchstoragePedalboardsBox.data('cloudPedalboards', null)
+        self.patchstoragePedalboardsBox.data('mergedPedalboards', null)
+        if (callback) {
+            callback(result)
+        }
+    })
+}
+
 Desktop.prototype.makePatchstoragePedalboardsBox = function (el, menuTrigger) {
     var self = this
 
@@ -1869,6 +1882,9 @@ Desktop.prototype.makePatchstoragePedalboardsBox = function (el, menuTrigger) {
             self.loadPedalboard(bundle, function () {
                 callback(true)
             })
+        },
+        sharePedalboard: function (bundle, callback) {
+            self.sharePedalboardOnPatchstorage(bundle, callback)
         }
     })
 

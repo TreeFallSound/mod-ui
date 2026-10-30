@@ -15,6 +15,9 @@ JqueryClass('patchstoragePedalboardsBox', {
             loadPedalboard: function (bundle, callback) {
                 callback(false)
             },
+            sharePedalboard: function (bundle, callback) {
+                callback(null)
+            },
             windowName: "Patchstorage Pedalboards",
             info: null,
             isMainWindow: true,
@@ -645,6 +648,7 @@ JqueryClass('patchstoragePedalboardsBox', {
                 info.find('.js-upgrade').hide()
                 info.find('.js-remove').hide()
                 info.find('.js-load').hide()
+                info.find('.js-share').hide()
 
                 if (pb.status == 'available') {
                     info.find('.js-install').show().click(function () {
@@ -687,6 +691,28 @@ JqueryClass('patchstoragePedalboardsBox', {
                         self.data('loadPedalboard')(pb.bundle, function () {
                             info.window('close')
                         })
+                    })
+                }
+
+                // Only an up-to-date copy may become the next revision, or an older copy
+                // would replace newer work. Without a login, ownership is checked after it.
+                if (pb.status == 'installed' && pb.bundle) {
+                    $.ajax({
+                        url: '/patchstorage/share/info',
+                        data: { bundlepath: pb.bundle },
+                        cache: false,
+                        dataType: 'json',
+                        success: function (resp) {
+                            if (!resp.ok || !resp.patch || (resp.auth.logged_in && !resp.patch.owned)) {
+                                return
+                            }
+                            info.find('.js-share').show().click(function () {
+                                self.data('sharePedalboard')(pb.bundle, function () {
+                                    info.window('close')
+                                    self.patchstoragePedalboardsBox('search')
+                                })
+                            })
+                        },
                     })
                 }
 
