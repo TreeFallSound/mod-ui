@@ -140,7 +140,7 @@ class Handler(BaseHTTPRequestHandler):
             api.patches[pid] = {
                 'title': form['title'], 'content': form['content'], 'revision': form['revision'],
                 'files': form['files'], 'artwork': form['artwork'], 'categories': form['categories'],
-                'license': form['license'], 'state': form['state'],
+                'license': form['license'], 'state': form['state'], 'preview_url': form.get('preview_url'),
                 'tags': [{'name': t} for t in form.get('tags', [])], 'platform': form['platform'],
                 'author': {'id': USER_ID, 'slug': 'treefallsound', 'name': 'treefallsound'},
             }
@@ -253,6 +253,26 @@ class TestShare(ShareTestCase):
 
         with open(os.path.join(self.bundle, 'patchstorage.json')) as fh:
             self.assertEqual(json.load(fh), {'id': result['id'], 'revision': '1.0'})
+
+    def test_preview_url(self):
+        self.login()
+        first = self.client.share(self.bundle, dict(self.fields, preview_url=' https://youtu.be/abc '))
+        self.assertEqual(self.api.patches[first['id']]['preview_url'], 'https://youtu.be/abc')
+        self.client.share(self.bundle, dict(self.fields, revision='1.1'), patch_id=first['id'])
+        self.assertEqual(self.api.patches[first['id']]['preview_url'], '', 'an empty field clears the link')
+
+    def test_broken_links_are_left_out(self):
+        self.login()
+        os.symlink('@greenback', os.path.join(self.bundle, 'effect-1', '@greenback'))
+        os.symlink('missing.wav', os.path.join(self.bundle, 'gone.wav'))
+        os.symlink('Crunch.ttl', os.path.join(self.bundle, 'alias.ttl'))
+        result = self.client.share(self.bundle, self.fields)
+        name, data = self.api.files[self.api.patches[result['id']]['files'][0]]
+        names = zipfile.ZipFile(io.BytesIO(data)).namelist()
+        self.assertNotIn('Crunch.pedalboard/effect-1/@greenback', names)
+        self.assertNotIn('Crunch.pedalboard/gone.wav', names)
+        self.assertIn('Crunch.pedalboard/alias.ttl', names)
+        self.assertIn('Crunch.pedalboard/effect-1/model.nam', names)
 
     def test_bookkeeping_file_not_uploaded(self):
         self.login()
@@ -372,7 +392,8 @@ class TestShare(ShareTestCase):
 
     def test_validation(self):
         self.login()
-        for bad in ({'title': ' '}, {'revision': ''}, {'license': None}, {'state': 'x'}, {'tags': ['x']}):
+        for bad in ({'title': ' '}, {'revision': ''}, {'license': None}, {'state': 'x'}, {'tags': ['x']},
+                    {'tags': [' ', '']}, {'preview_url': 'youtube.com/watch?v=1'}, {'preview_url': 'javascript:alert(1)'}):
             with self.assertRaises(PatchstorageError):
                 self.client.share(self.bundle, dict(self.fields, **bad))
         self.assertEqual(len(self.api.requests), 1, 'only the login should have reached the server')

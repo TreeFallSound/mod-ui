@@ -254,6 +254,7 @@ JqueryClass('patchstorageShareBox', {
 
             self.patchstorageShareBox('clearArtwork')
             form.find('.js-artwork').toggle(!info.has_screenshot)
+            form.find('input[name=confirm]').prop('checked', false)
 
             self.patchstorageShareBox('applyMode')
             self.patchstorageShareBox('showStep', 'form')
@@ -283,6 +284,7 @@ JqueryClass('patchstorageShareBox', {
             form.find('input[name=tags]').val(patch.tags.join(', '))
             form.find('select[name=license]').val(String(patch.license))
             form.find('select[name=state]').val(String(patch.state))
+            form.find('input[name=preview_url]').val(patch.preview_url || '')
             form.find('.js-publish').text('Publish revision')
         } else {
             var description = 'A pedalboard for pi-Stomp.'
@@ -295,6 +297,7 @@ JqueryClass('patchstorageShareBox', {
             form.find('input[name=tags]').val(info.default_tags.join(', '))
             form.find('select[name=license]').val('')
             selectBySlug('state', 'ready-to-go')
+            form.find('input[name=preview_url]').val('')
             form.find('.js-publish').text('Publish')
         }
     },
@@ -345,16 +348,27 @@ JqueryClass('patchstorageShareBox', {
             tags: form.find('input[name=tags]').val(),
             license: form.find('select[name=license]').val(),
             state: form.find('select[name=state]').val(),
+            preview_url: form.find('input[name=preview_url]').val().trim(),
+            confirm: form.find('input[name=confirm]').is(':checked') ? '1' : '',
         }
 
         var missing = []
         if (!data.title) missing.push('a title')
         if (!data.content) missing.push('a description')
         if (!data.revision) missing.push('a revision')
+        if (!data.tags.trim()) missing.push('at least one tag')
         if (!data.license) missing.push('a license')
         if (!self.data('info').has_screenshot && !self.data('artwork')) missing.push('an artwork image')
         if (missing.length) {
             form.find('.js-error').text('Please enter ' + missing.join(', ') + '.')
+            return
+        }
+        if (data.preview_url && !/^https?:\/\/\S+$/i.test(data.preview_url)) {
+            form.find('.js-error').text('The preview URL must be a link starting with https://')
+            return
+        }
+        if (!data.confirm) {
+            form.find('.js-error').text('Please confirm that you have the rights to share this content.')
             return
         }
         form.find('.js-error').text('')

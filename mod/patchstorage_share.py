@@ -135,7 +135,12 @@ def zip_bundle(bundlepath, destfile):
             for name in sorted(files):
                 if name.startswith('.') or (relroot == '.' and name == BUNDLE_METADATA_FILE):
                     continue
-                zf.write(os.path.join(root, name), os.path.join(arcroot, name))
+                path = os.path.join(root, name)
+                # os.path.exists follows the link, so it is False for dangling and looping links
+                if not os.path.exists(path):
+                    logging.warning('[patchstorage] not zipping broken link %s -> %s', path, os.readlink(path))
+                    continue
+                zf.write(path, os.path.join(arcroot, name))
 
 
 class PatchstorageClient(object):
@@ -295,7 +300,8 @@ class PatchstorageClient(object):
     def share(self, bundlepath, fields, patch_id=None, artwork=None):
         """
         Upload the bundle and create (patch_id None) or update a patch.
-        fields: title, content, revision, tags (list of str), license (int), state (int).
+        fields: title, content, revision, tags (list of str), license (int), state (int),
+        preview_url (optional; empty clears it).
         artwork: image bytes, used only when the bundle has no screenshot.png.
         Returns {'id', 'url', 'revision'} and stamps patchstorage.json into the bundle.
         """
@@ -305,9 +311,14 @@ class PatchstorageClient(object):
         tags = [t.strip() for t in fields.get('tags') or [] if t and t.strip()]
         if not title or not content or not revision:
             raise PatchstorageError('Title, description and revision are required')
+        if not tags:
+            raise PatchstorageError('Add at least one tag')
         bad_tags = [t for t in tags if not 2 <= len(t) <= 25]
         if bad_tags:
             raise PatchstorageError('Tags must be 2 to 25 characters: %s' % ', '.join(bad_tags))
+        preview_url = (fields.get('preview_url') or '').strip()
+        if preview_url and not re.match(r'^https?://\S+$', preview_url, re.IGNORECASE):
+            raise PatchstorageError('The preview URL must be a link starting with https://')
         try:
             license_id, state = int(fields['license']), int(fields['state'])
         except (KeyError, TypeError, ValueError):
@@ -361,6 +372,7 @@ class PatchstorageClient(object):
                 'title': title,
                 'content': content,
                 'revision': revision,
+                'preview_url': preview_url,
                 'files': [file_id],
                 'artwork': artwork_id,
                 'tags': tags,

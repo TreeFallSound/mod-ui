@@ -381,6 +381,24 @@ class TimelessRequestHandler(web.RequestHandler):
     def should_return_304(self):
         return False
 
+def _html_fingerprint():
+    """
+    Newest modification time under HTML_DIR, in hex. Static files are cached for a year and
+    keyed on "?v=", so this makes the key change whenever the web files do, not only with a
+    new OS image.
+    """
+    newest = 0
+    for root, dirs, files in os.walk(HTML_DIR):
+        dirs[:] = [d for d in dirs if not d.startswith('.') and d != 'node_modules']
+        for name in files:
+            try:
+                newest = max(newest, os.path.getmtime(os.path.join(root, name)))
+            except OSError:
+                pass
+    return '%x' % int(newest)
+
+HTML_FINGERPRINT = _html_fingerprint()
+
 class TimelessStaticFileHandler(web.StaticFileHandler):
     def compute_etag(self):
         return None
@@ -1876,6 +1894,7 @@ class PatchstorageShareInfo(JsonRequestHandler):
                     'revision': patch.get('revision'),
                     'next_revision': bump_revision(patch.get('revision')),
                     'tags': [t['name'] for t in patch.get('tags') or []],
+                    'preview_url': patch.get('preview_url') or '',
                     'license': (patch.get('license') or {}).get('id'),
                     'state': (patch.get('state') or {}).get('id'),
                     'author': (patch.get('author') or {}).get('name'),
@@ -1892,6 +1911,10 @@ class PatchstorageShare(JsonRequestHandler):
             self.write({'ok': False, 'error': 'Only your own saved pedalboards can be shared'})
             return
 
+        if self.get_argument('confirm', '') != '1':
+            self.write({'ok': False, 'error': 'Please confirm that you have the rights to share this content'})
+            return
+
         patch_id = None
         if self.get_argument('mode', 'new') == 'update':
             meta = read_bundle_metadata(bundlepath)
@@ -1905,6 +1928,7 @@ class PatchstorageShare(JsonRequestHandler):
             'content': self.get_argument('content', ''),
             'revision': self.get_argument('revision', ''),
             'tags': self.get_argument('tags', '').split(','),
+            'preview_url': self.get_argument('preview_url', ''),
             'license': self.get_argument('license', None),
             'state': self.get_argument('state', None),
         }
@@ -2222,8 +2246,14 @@ class TemplateHandler(TimelessRequestHandler):
         if IMAGE_VERSION is not None and len(IMAGE_VERSION) > 1:
             # strip initial 'v' from version if present
             version = IMAGE_VERSION[1:] if IMAGE_VERSION[0] == "v" else IMAGE_VERSION
-            return url_escape(version)
+            return url_escape('%s-%s' % (version, HTML_FINGERPRINT))
         return str(int(time.time()))
+
+    def get_image_version(self):
+        # "?v=" without the HTML_FINGERPRINT suffix; pages expose it as VERSION
+        version = self.get_argument('v')
+        suffix = '-' + HTML_FINGERPRINT
+        return version[:-len(suffix)] if version.endswith(suffix) else version
 
     def index(self):
         user_id = safe_json_load(USER_ID_JSON_FILE, dict)
@@ -2255,6 +2285,7 @@ class TemplateHandler(TimelessRequestHandler):
             'controlchain_url': CONTROLCHAIN_HTTP_ADDRESS,
             'hardware_profile': b64encode(json.dumps(SESSION.get_hardware_actuators()).encode("utf-8")),
             'version': self.get_argument('v'),
+            'image_version': self.get_image_version(),
             'bin_compat': hwdesc.get('bin-compat', "Unknown"),
             'codec_truebypass': 'true' if hwdesc.get('codec_truebypass', False) else 'false',
             'factory_pedalboards': hwdesc.get('factory_pedalboards', False),
@@ -2318,6 +2349,7 @@ class TemplateHandler(TimelessRequestHandler):
     def allguis(self):
         context = {
             'version': self.get_argument('v'),
+            'image_version': self.get_image_version(),
         }
         return context
 
@@ -2329,6 +2361,7 @@ class TemplateHandler(TimelessRequestHandler):
             'cloud_url': CLOUD_HTTP_ADDRESS,
             'controlchain_url': CONTROLCHAIN_HTTP_ADDRESS,
             'version': self.get_argument('v'),
+            'image_version': self.get_image_version(),
             'hmi_eeprom': 'true' if hwdesc.get('hmi_eeprom', False) else 'false',
             'preferences': json.dumps(prefs),
             'bufferSize': get_jack_buffer_size(),

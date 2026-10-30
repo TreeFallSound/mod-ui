@@ -24,7 +24,7 @@ as packaged.
 ```bash
 git switch my-branch
 ./deploy.sh            # snapshot the packaged files (first time only), copy, restart, wait for port 80
-# test at http://pistomp.local/ — hard-reload the browser so it drops cached JS/CSS
+# test at http://pistomp.local/ — a normal reload picks up new JS/CSS (the ?v= key changes on each deploy)
 ./deploy.sh logs       # follow the mod-ui journal while you test
 # edit, then ./deploy.sh again; repeat
 ./deploy.sh status     # what is on the device right now

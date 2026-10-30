@@ -79,7 +79,7 @@
     PEDALBOARDS_LABS_URL  = '{{pedalboards_labs_url}}'
     CONTROLCHAIN_URL = '{{controlchain_url}}'
     LV2_PLUGIN_DIR   = '{{lv2_plugin_dir}}'
-    VERSION          = '{{version}}'
+    VERSION          = '{{image_version}}'
     BIN_COMPAT       = '{{bin_compat}}'
     PLATFORM         = '{{platform}}'
     var SAMPLERATE   = {{sampleRate}}
@@ -1107,25 +1107,32 @@ $('document').ready(function() {
                 </div>
                 <p class="ps-share-note js-not-owned">This pedalboard came from <b class="js-author"></b> on Patchstorage,
                    so it will be shared as a new pedalboard under your name.</p>
-                <label>Title <input type="text" name="title" maxlength="100"/></label>
-                <label>Description <textarea name="content" rows="5"></textarea></label>
+                <label>Title * <input type="text" name="title" maxlength="100"/></label>
+                <label>Description * <textarea name="content" rows="5"></textarea></label>
                 <div class="ps-share-row">
-                    <label>Revision <input type="text" name="revision" maxlength="20"/></label>
-                    <label>State <select name="state"></select></label>
+                    <label>Revision * <input type="text" name="revision" maxlength="20"/></label>
+                    <label>State * <select name="state"></select></label>
                 </div>
-                <label>Tags <small>(comma separated)</small> <input type="text" name="tags"/></label>
-                <label>License <select name="license"></select></label>
+                <label>Tags * <small>(comma separated)</small> <input type="text" name="tags"/></label>
+                <label>License * <select name="license"></select></label>
+                <label>Preview URL <small>(optional)</small>
+                    <input type="text" name="preview_url" maxlength="500"
+                           placeholder="A YouTube, Vimeo or SoundCloud link to a demo"/></label>
                 <!-- only shown when the pedalboard has no screenshot.png to use as artwork -->
                 <div class="ps-share-artwork js-artwork">
                     <img class="js-artwork-preview" alt=""/>
                     <div>
-                        <span>Artwork</span>
+                        <span>Artwork *</span>
                         <small class="js-artwork-name"></small>
                         <input type="file" name="artwork" class="mod-hidden"
                                accept="image/png,image/jpeg,image/gif,image/webp"/>
                         <button type="button" class="js-artwork-choose btn btn-info btn-mini">Choose image...</button>
                     </div>
                 </div>
+                <label class="ps-share-confirm"><input type="checkbox" name="confirm" value="1"/>
+                    I confirm that I have the necessary rights to upload and share this content, and that it does
+                    not infringe on any copyrights, trademarks or other third-party rights. *</label>
+                <p class="ps-share-required">* required</p>
                 <p class="ps-share-error js-error"></p>
                 <div class="ps-share-actions">
                     <button type="button" class="js-close btn btn-danger">Cancel</button>

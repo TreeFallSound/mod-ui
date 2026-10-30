@@ -263,6 +263,24 @@
   color: #aaa;
 }
 
+#patchstorage-share-window .ps-share-confirm {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  color: #ddd;
+}
+
+#patchstorage-share-window .ps-share-confirm input {
+  flex: none;
+  margin: 2px 0 0 0;
+}
+
+#patchstorage-share-window .ps-share-required {
+  margin: 0 0 6px 0;
+  font-size: 11px;
+  color: #888;
+}
+
 #patchstorage-share-window .ps-share-mode {
   margin-bottom: 12px;
   padding: 8px 10px;
